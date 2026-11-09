@@ -237,7 +237,7 @@ void DspProcessor::setEqualizer(
         for (std::size_t band = 0; band < kEqualizerBandCount; ++band) {
             const float safeGain = std::isfinite(gainsDb[band]) ? gainsDb[band] : 0.0F;
             targetEqGainsDb_[band].store(
-                std::clamp(safeGain, -8.0F, 8.0F),
+                std::clamp(safeGain, -12.0F, 12.0F),
                 std::memory_order_release);
         }
     }

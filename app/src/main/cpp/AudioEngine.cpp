@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 #include <atomic>
+#include <mutex>
 
 #include "DspProcessor.h"
 #include "PcmConverter.h"
@@ -12,6 +13,8 @@ namespace {
 
 static lastwave::audio::DspProcessor gDsp;
 static std::atomic<float> gLoudnessGainLinear{1.0f};
+static std::atomic<int> gConfiguredSampleRate{0};
+static std::mutex gConfigMutex;
 
 } // namespace
 
@@ -27,8 +30,19 @@ Java_com_myplayer_app_playback_dsp_MasterAudioDspProcessor_nativeConfigure(
         jint clarityPresetOrd,
         jfloat loudnessGainDb) {
 
-    const double sr = sampleRate > 0 ? static_cast<double>(sampleRate) : 48000.0;
-    gDsp.configure(sr);
+    const int safeSr = sampleRate > 0 ? static_cast<int>(sampleRate) : 48000;
+    {
+        std::lock_guard<std::mutex> lock(gConfigMutex);
+        // CRITICAL FIX: Only call gDsp.configure(sr) when the stream sample rate actually changes!
+        // Calling gDsp.configure(sr) on every EQ slider drag called reset(), which wiped all 15
+        // biquad delay lines, triggered a 2ms mute fade, and raced with gDsp.process() on the audio thread!
+        if (gConfiguredSampleRate.load(std::memory_order_relaxed) != safeSr) {
+            gDsp.configure(static_cast<double>(safeSr));
+            gConfiguredSampleRate.store(safeSr, std::memory_order_relaxed);
+        }
+    }
+
+    // All setters below are lock-free std::atomic operations that smoothly interpolate inside process()!
     gDsp.setBitPerfect(bitPerfect == JNI_TRUE);
 
     if (eqGains != nullptr && env->GetArrayLength(eqGains) == static_cast<jsize>(lastwave::audio::DspProcessor::kEqualizerBandCount)) {
@@ -70,7 +84,7 @@ Java_com_myplayer_app_playback_dsp_MasterAudioDspProcessor_nativeProcessPcmFloat
 
     auto *samples = reinterpret_cast<float *>(base + byteOffset);
 
-    // Apply loudness gain if non-unity
+    // Apply loudness / preamp gain if non-unity
     const float loudness = gLoudnessGainLinear.load(std::memory_order_relaxed);
     if (std::abs(loudness - 1.0f) > 0.0001f) {
         const size_t totalSamples = static_cast<size_t>(frameCount) * static_cast<size_t>(channelCount);
@@ -113,7 +127,7 @@ Java_com_myplayer_app_playback_dsp_MasterAudioDspProcessor_nativeProcessPcm16(
         return;
     }
 
-    // Apply loudness gain if non-unity
+    // Apply loudness / preamp gain if non-unity
     const float loudness = gLoudnessGainLinear.load(std::memory_order_relaxed);
     if (std::abs(loudness - 1.0f) > 0.0001f) {
         for (size_t i = 0; i < totalSamples; ++i) {

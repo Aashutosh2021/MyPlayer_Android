@@ -20617,41 +20617,15 @@ enum class MyPlayerLoudnessPreset(val label: String, val boostDb: Float, val com
 
 
 fun MyPlayerAudioLabHubScreen(
-
-
-
     myplayerState: MyPlayerUiStateHolder,
-
-
-
     onOpenEqualizer: () -> Unit = {},
-
-
-
     onBack: () -> Unit
-
-
-
 ) {
-
-
-
     MyPlayerAudioFxScreen(
-
-
-
         myplayerState = myplayerState,
-
-
-
+        onOpenEqualizer = onOpenEqualizer,
         onBack = onBack
-
-
-
     )
-
-
-
 }
 
 
@@ -20685,17 +20659,9 @@ fun MyPlayerAudioLabHubScreen(
 
 
 fun MyPlayerAudioFxScreen(
-
-
-
     myplayerState: MyPlayerUiStateHolder,
-
-
-
+    onOpenEqualizer: () -> Unit = {},
     onBack: () -> Unit
-
-
-
 ) {
 
 
@@ -21391,6 +21357,106 @@ fun MyPlayerAudioFxScreen(
 
 
 
+
+        // ── CARD 0A: 10-BAND RAINBOW EQUALIZER & AUTOEQ (2500+ HEADPHONES) ──
+        item {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MyPlayerSurface,
+                border = BorderStroke(1.dp, if (myplayerState.eqEnabled) MyPlayerAccentGreen.copy(alpha = 0.65f) else MyPlayerCardBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenEqualizer() }
+            ) {
+                Row(
+                    modifier = Modifier.padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(MyPlayerAccentGreen.copy(alpha = 0.18f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MyPlayerAccentGreen)
+                        }
+                        Column {
+                            Text(
+                                text = "10-Band Rainbow Equalizer & AutoEQ",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MyPlayerTextPrimary
+                            )
+                            Text(
+                                text = if (myplayerState.eqEnabled) "ON • ${myplayerState.selectedAutoEqModel ?: myplayerState.eqPreset.label} • Tap to tune bands"
+                                else "OFF • 20 Presets + 2,500+ AutoEQ Headphone Profiles",
+                                fontSize = 12.sp,
+                                color = if (myplayerState.eqEnabled) MyPlayerAccentGreen else MyPlayerTextSecondary
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = myplayerState.eqEnabled,
+                        onCheckedChange = {
+                            myplayerState.eqEnabled = it
+                            MyPlayerAudioFxDspBridge.setEq(it, myplayerState.eqBands, myplayerState.preampDb)
+                        }
+                    )
+                }
+            }
+        }
+
+        // ── CARD 0B: APPLE MUSIC STYLE EQUAL-POWER CROSSFADE ────────────────
+        item {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MyPlayerSurface,
+                border = BorderStroke(1.dp, if (myplayerState.autoCrossfade || myplayerState.manualCrossfade) MyPlayerAccentGreen.copy(alpha = 0.65f) else MyPlayerCardBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    CrossfadeWaveformGraphic(labelLeft = "Outgoing Track", labelRight = "Incoming Track")
+                    Spacer(Modifier.height(14.dp))
+                    MyPlayerSwitchRow(
+                        title = "Apple-Style Auto Crossfade",
+                        subtitle = "Equal-power S-curve transition between tracks (works on online & offline songs)",
+                        checked = myplayerState.autoCrossfade || myplayerState.manualCrossfade,
+                        onCheckedChange = {
+                            myplayerState.autoCrossfade = it
+                            myplayerState.manualCrossfade = it
+                            MyPlayerAudioFxDspBridge.syncFromUiState(myplayerState)
+                        }
+                    )
+                    AnimatedVisibility(visible = myplayerState.autoCrossfade || myplayerState.manualCrossfade) {
+                        Column {
+                            Spacer(Modifier.height(10.dp))
+                            MyPlayerLabeledSlider(
+                                label = "Crossfade overlap",
+                                valueText = "${myplayerState.crossfadeLengthSec.roundToInt()}s",
+                                value = myplayerState.crossfadeLengthSec,
+                                valueRange = 1f..12f,
+                                onValueChange = {
+                                    myplayerState.crossfadeLengthSec = it
+                                    MyPlayerAudioFxDspBridge.syncFromUiState(myplayerState)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── CARD 0C: PHONE-MIC ACTIVE NOISE CANCELLATION (ANC) ──────────────
+        item {
+            MyPlayerAncSettingsCard()
+        }
 
         // ── CARD 1: REVERB (Exact match to screenshot) ───────────────────────
 

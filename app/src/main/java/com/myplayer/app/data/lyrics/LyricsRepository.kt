@@ -183,7 +183,9 @@ class LyricsRepository @Inject constructor(
                     val retriever = MediaMetadataRetriever()
                     try {
                         retriever.setDataSource(audioFile.absolutePath)
-                        val embedded = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LYRICS)
+                        val embedded = try {
+                            retriever.extractMetadata(1000)
+                        } catch (_: Exception) { null }
                         if (!embedded.isNullOrBlank()) {
                             Log.d(TAG, "Extracted embedded ID3 lyrics from ${audioFile.name}")
                             return saveCustomLyrics(songId, trackName, artistName, embedded)

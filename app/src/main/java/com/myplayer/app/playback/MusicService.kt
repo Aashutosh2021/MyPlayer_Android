@@ -222,13 +222,33 @@ class MusicService : MediaSessionService() {
         // MyPlayer Audio FX Speed & Pitch live bridge hook (dispatched safely on Main thread)
 
         // Master Audio & Playback Feature Integration:
-        // 1. Crossfade engine monitor
+        // 1. Apple Music-style Equal-Power Crossfade engine monitor (works for both local & online queues!)
         audioFeatureManagers.attachCrossfadeMonitor(
             scope = serviceScope,
             exoPlayer = player,
-            isEnabled = { currentAudioPlaybackState.crossfadeEnabled },
-            crossfadeDurationSec = currentAudioPlaybackState.crossfadeSeconds
+            isEnabled = {
+                currentAudioPlaybackState.crossfadeEnabled ||
+                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeEnabled
+            },
+            crossfadeDurationSec = currentAudioPlaybackState.crossfadeSeconds,
+            crossfadeSecondsProvider = {
+                if (com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeEnabled) {
+                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeSeconds
+                } else {
+                    currentAudioPlaybackState.crossfadeSeconds.toFloat()
+                }
+            },
+            onTriggerNextTrack = {
+                playbackEventBus.emit(PlaybackEvent.SkipToNextRequested)
+            }
         )
+
+        com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.onUpdateCrossfadeConfig = { enabled, seconds ->
+            serviceScope.launch {
+                audioPlaybackStore.setCrossfade(enabled)
+                audioPlaybackStore.setCrossfadeSeconds(seconds)
+            }
+        }
 
         // 2. Observe Master Audio & Playback Preferences (15-Band EQ, Studio Master Clarity, -14 LUFS, Bit-Perfect)
         serviceScope.launch {
@@ -245,6 +265,16 @@ class MusicService : MediaSessionService() {
                         surround = state.dolbySurroundAtmos
                     )
                 )
+                // Keep unified AudioFxService spatial processor synced when changed from AudioAndPlaybackScreen
+                if (state.spatialAudioEnabled || state.dolbySurroundAtmos) {
+                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.spatialEnabled = state.spatialAudioEnabled
+                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.spatialIsSpeakersMode =
+                        (state.spatialMode == com.myplayer.app.data.preferences.SpatialMode.SPEAKERS)
+                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.speakerAngleDeg = state.spatialSpeakerAngle
+                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.spatialAmount = state.spatialAmount
+                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.dolbySurroundEnabled = state.dolbySurroundAtmos
+                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.pushFx()
+                }
             }
         }
 
@@ -348,6 +378,7 @@ class MusicService : MediaSessionService() {
 
     override fun onDestroy() {
         com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.onUpdatePlaybackSpeedPitch = null
+        com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.onUpdateCrossfadeConfig = null
         releaseLocks()
         try {
             loudnessEnhancer?.release()

@@ -151,6 +151,7 @@ class AudioPlaybackStore @Inject constructor(
         val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality")
         val BIT_PERFECT = booleanPreferencesKey("bit_perfect")
         val CROSSFADE = booleanPreferencesKey("crossfade")
+        val CROSSFADE_SECONDS = androidx.datastore.preferences.core.intPreferencesKey("crossfade_seconds")
         val KEEP_AWAKE_LYRICS = booleanPreferencesKey("keep_awake_lyrics")
         val DOWNLOAD_LRC = booleanPreferencesKey("download_lrc")
         val USB_EXCLUSIVE = booleanPreferencesKey("usb_exclusive")
@@ -181,6 +182,7 @@ class AudioPlaybackStore @Inject constructor(
             downloadQuality = runCatching { AudioQualityTier.valueOf(prefs[Keys.DOWNLOAD_QUALITY] ?: "DOLBY_ATMOS") }.getOrDefault(AudioQualityTier.DOLBY_ATMOS),
             bitPerfectMode = prefs[Keys.BIT_PERFECT] ?: false,
             crossfadeEnabled = prefs[Keys.CROSSFADE] ?: false,
+            crossfadeSeconds = (prefs[Keys.CROSSFADE_SECONDS] ?: 6).coerceIn(1, 12),
             keepScreenAwakeLyrics = prefs[Keys.KEEP_AWAKE_LYRICS] ?: false,
             downloadSyncedLyrics = prefs[Keys.DOWNLOAD_LRC] ?: true,
             usbExclusiveOutput = prefs[Keys.USB_EXCLUSIVE] ?: false,
@@ -213,6 +215,7 @@ class AudioPlaybackStore @Inject constructor(
         if (!enabled) it[Keys.USB_EXCLUSIVE] = false
     }
     suspend fun setCrossfade(enabled: Boolean) = update { it[Keys.CROSSFADE] = enabled }
+    suspend fun setCrossfadeSeconds(seconds: Int) = update { it[Keys.CROSSFADE_SECONDS] = seconds.coerceIn(1, 12) }
     suspend fun setKeepAwakeLyrics(enabled: Boolean) = update { it[Keys.KEEP_AWAKE_LYRICS] = enabled }
     suspend fun setDownloadSyncedLyrics(enabled: Boolean) = update { it[Keys.DOWNLOAD_LRC] = enabled }
     suspend fun setUsbExclusive(enabled: Boolean) = update {
@@ -236,7 +239,7 @@ class AudioPlaybackStore @Inject constructor(
         val stored = it[Keys.EQ_BANDS_CSV]?.split(",")?.mapNotNull { v -> v.toFloatOrNull() }
             ?.takeIf { l -> l.size == 15 }
         val base = stored ?: currentBands.takeIf { l -> l.size == 15 } ?: List(15) { 0f }
-        val updated = base.toMutableList().apply { this[index] = gainDb.coerceIn(-8f, 8f) }
+        val updated = base.toMutableList().apply { this[index] = gainDb.coerceIn(-12f, 12f) }
         it[Keys.EQ_BANDS_CSV] = updated.joinToString(",")
     }
     suspend fun setSystemAudioEffects(enabled: Boolean) = update { it[Keys.SYSTEM_FX] = enabled }

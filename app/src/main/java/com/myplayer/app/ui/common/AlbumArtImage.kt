@@ -71,10 +71,13 @@ fun AlbumArtImage(
         }
     }
 
-    // Keep consistent URL so Coil disk cache hits both in list view and NowPlaying screen offline!
+    // Keep consistent URL so Coil disk cache hits both in list view, Search Mood/Genre cards, and NowPlaying screen!
     val requestModel: Any? = remember(resolvedUri, title, artist, album) {
         if (resolvedUri.isNotBlank() && (resolvedUri.startsWith("file://") || resolvedUri.startsWith("content://"))) {
             Uri.parse(resolvedUri)
+        } else if (resolvedUri.startsWith("http://") || resolvedUri.startsWith("https://")) {
+            // Direct HTTP/HTTPS thumbnail URL (e.g. Search Moods/Genres cards or YouTube artwork): load directly via Coil!
+            resolvedUri
         } else if (!title.isNullOrBlank() || !artist.isNullOrBlank()) {
             ArtworkModel(title = title, artist = artist, album = album, localUri = resolvedUri.ifBlank { null })
         } else if (resolvedUri.isNotBlank()) {

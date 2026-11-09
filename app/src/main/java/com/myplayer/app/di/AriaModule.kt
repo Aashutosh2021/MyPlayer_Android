@@ -11,11 +11,13 @@ import com.myplayer.app.aria.security.CallerVerifier
 import com.myplayer.app.data.local.dao.DownloadedSongDao
 import com.myplayer.app.data.local.dao.SongDao
 import com.myplayer.app.data.lyrics.LyricsRepository
+import com.myplayer.app.data.preferences.AudioPlaybackStore
 import com.myplayer.app.data.online.InnertubeApi
 import com.myplayer.app.data.repository.DownloadRepository
 import com.myplayer.app.data.repository.MusicRepository
 import com.myplayer.app.playback.MusicController
 import com.myplayer.app.playback.PlaybackEventBus
+import com.myplayer.app.playback.dsp.MasterAudioDspProcessor
 import com.myplayer.app.security.SignatureVerifier
 import dagger.Module
 import dagger.Provides
@@ -147,8 +149,11 @@ object AriaModule {
 
     @Provides
     @Singleton
-    fun provideEqualizerProvider(): EqualizerProvider {
-        return EqualizerProvider()
+    fun provideEqualizerProvider(
+        masterAudioDspProcessor: MasterAudioDspProcessor,
+        audioPlaybackStore: AudioPlaybackStore
+    ): EqualizerProvider {
+        return EqualizerProvider(masterAudioDspProcessor, audioPlaybackStore)
     }
 
     @Provides

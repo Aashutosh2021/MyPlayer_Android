@@ -169,6 +169,25 @@ fun SettingsScreen(
 
     var showUserManualDialog by remember { mutableStateOf(false) }
     var showDonateDialog by remember { mutableStateOf(false) }
+    var showInteractiveTour by remember { mutableStateOf(false) }
+
+    if (showInteractiveTour && myplayerState != null) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showInteractiveTour = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            MyPlayerInteractiveFeatureTour(
+                myplayerState = myplayerState,
+                onApplyEqToEngine = { enabled, gains, preamp ->
+                    MyPlayerAudioFxDspBridge.setEq(enabled, gains, preamp)
+                },
+                onFinishTour = {
+                    myplayerState.completeFeatureTour()
+                    showInteractiveTour = false
+                }
+            )
+        }
+    }
 
 
 
@@ -1315,15 +1334,17 @@ fun SettingsScreen(
                 MyPlayerSettingsDivider()
 
                 MyPlayerSettingsNavigationRow(
-
                     icon = Icons.Filled.Palette,
-
                     title = "Customize Player Styles",
-
                     subtitle = "Active: ${myplayerState?.playerStyle?.title ?: "Radial (MyPlayer)"} • 6 unique styles",
-
                     onClick = onNavigateToPlayerStyles
-
+                )
+                MyPlayerSettingsDivider()
+                MyPlayerSettingsNavigationRow(
+                    icon = Icons.Filled.BlurOn,
+                    title = "Player Appearance & Lyrics Shaders",
+                    subtitle = "Glass blur, progressive blur, bloom & animated canvas settings",
+                    onClick = onNavigateToMyPlayerAppearance
                 )
 
             }
@@ -1366,22 +1387,37 @@ fun SettingsScreen(
 
                 MyPlayerSettingsDivider()
 
-                MyPlayerSettingsToggleRow(
-
-                    icon = Icons.Filled.AutoAwesome,
-
-                    title = "Autoplay Recommendations",
-
-                    subtitle = "Automatically play similar songs when the queue ends",
-
-                    checked = isAutoplayEnabled,
-
-                    onCheckedChange = { viewModel.setAutoplayEnabled(it) }
-
+                MyPlayerSettingsDivider()
+                MyPlayerSettingsNavigationRow(
+                    icon = Icons.Filled.Tune,
+                    title = "Audio FX Lab & 10-Band Rainbow EQ",
+                    subtitle = "Reverb, 3D Spatial, AutoEQ (2500+ headphones), Slowed + Reverb & Apple Crossfade",
+                    onClick = onNavigateToMyPlayerAudioLab
                 )
-
+                MyPlayerSettingsDivider()
+                MyPlayerSettingsToggleRow(
+                    icon = Icons.Filled.AutoAwesome,
+                    title = "Autoplay Recommendations",
+                    subtitle = "Automatically play similar songs when the queue ends",
+                    checked = isAutoplayEnabled,
+                    onCheckedChange = { viewModel.setAutoplayEnabled(it) }
+                )
             }
+        }
 
+        // Phone-Mic ANC & Desi Mood Vibe-Check Cards directly accessible in Settings!
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                MyPlayerAncSettingsCard()
+                if (myplayerState != null) {
+                    MyPlayerFunnyVibeCheckSettingsCard(myplayerState = myplayerState)
+                }
+            }
         }
 
 
@@ -1395,16 +1431,23 @@ fun SettingsScreen(
             MyPlayerSettingsCard {
 
                 MyPlayerSettingsNavigationRow(
-
                     icon = Icons.AutoMirrored.Filled.MenuBook,
-
                     title = "User Manual & Feature Guide",
-
                     subtitle = "Complete guide to gestures, audio engine, equalizer, styles & access paths",
-
                     onClick = { showUserManualDialog = true }
-
                 )
+                if (myplayerState != null) {
+                    MyPlayerSettingsDivider()
+                    MyPlayerSettingsNavigationRow(
+                        icon = Icons.Filled.Explore,
+                        title = "Interactive Feature Tour",
+                        subtitle = "Replay the step-by-step click-through tour of Player Styles, EQ, Audio FX & Crossfade",
+                        onClick = {
+                            myplayerState.startFeatureTour()
+                            showInteractiveTour = true
+                        }
+                    )
+                }
 
             }
 

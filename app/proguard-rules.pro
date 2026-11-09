@@ -226,3 +226,10 @@
 -keep class com.myplayer.app.playback.dsp.MasterAudioDspProcessor {
     native <methods>;
 }
+# =============================================================================
+# ── ARIA CONNECTOR IPC & MYPLAYER DSP / ANC KEEP RULES ───────────────────────
+# =============================================================================
+-keep class com.example.aria.connector.** { *; }
+-keep class com.myplayer.app.aria.** { *; }
+-keep class com.myplayer.app.myplayerfx.** { *; }
+-keep class com.myplayer.app.ui.myplayer.** { *; }

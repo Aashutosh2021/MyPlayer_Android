@@ -332,11 +332,15 @@ object PlayerModule {
     ): ExoPlayer {
         // MyPlayer Audio Lab chain (needs 16-bit PCM, so float output is off): spatial/surround/mono, reverb, loudness
         val replayGain = com.myplayer.app.myplayerfx.audio.ReplayGainTags()
-        com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.attach(audioFx)
+        // Attach both AudioFxService AND MasterAudioDspProcessor so 10-Band Rainbow EQ + AutoEQ + Preamp work live!
+        com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.attach(audioFx, masterAudioDspProcessor)
+        // Single unified Spatial -> Master 15/10-Band EQ & Clarity -> Reverb -> Loudness -> Phone-Mic ANC chain
+        // (Fixes bug where two separate SpatialAudioProcessors ran in series and double-filtered audio)
         val myplayerFx = arrayOf<androidx.media3.common.audio.AudioProcessor>(
             com.myplayer.app.myplayerfx.audio.SpatialAudioProcessor(audioFx),
             com.myplayer.app.myplayerfx.audio.ReverbAudioProcessor(audioFx),
             com.myplayer.app.myplayerfx.audio.LoudnessAudioProcessor(audioFx),
+            com.myplayer.app.ui.myplayer.MyPlayerAncAudioProcessor(),
         )
         val prefs = context.getSharedPreferences("playback_preferences", Context.MODE_PRIVATE)
         val initialRepeat = prefs.getInt("playback_repeat_mode", Player.REPEAT_MODE_OFF)
@@ -442,7 +446,7 @@ object PlayerModule {
                     .setEnableFloatOutput(false)
                     .setEnableAudioTrackPlaybackParams(false)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
-                    .setAudioProcessors(arrayOf(spatialAudioProcessor, masterAudioDspProcessor, *myplayerFx))
+                    .setAudioProcessors(arrayOf(masterAudioDspProcessor, *myplayerFx))
                     .build()
                 return com.myplayer.app.myplayerfx.audio.MyPlayerVolumeSink(sink, audioFx, replayGain)
             }

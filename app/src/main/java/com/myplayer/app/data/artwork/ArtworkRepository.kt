@@ -148,8 +148,12 @@ class ArtworkRepository @Inject constructor(
                     "$url=w800-h800-l90-rj"
                 }
             }
-            url.contains("i.ytimg.com") -> {
-                url.replace(Regex("""/hqdefault\.jpg$"""), "/hq720.jpg")
+            url.contains("i.ytimg.com") || url.contains("img.youtube.com") -> {
+                // CRITICAL FIX: Never blindly rewrite /hqdefault.jpg to /hq720.jpg!
+                // Many YouTube videos (including Moods & Genres cards and classic songs) do not have
+                // hq720.jpg on YouTube servers and return HTTP 404 Not Found, whereas hqdefault.jpg
+                // is guaranteed to exist for 100% of YouTube videos.
+                url
             }
             else -> url.replace(Regex("""w\d+-h\d+"""), "w800-h800")
         }

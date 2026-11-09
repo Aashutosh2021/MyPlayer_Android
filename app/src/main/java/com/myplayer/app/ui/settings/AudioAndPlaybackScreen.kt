@@ -192,15 +192,68 @@ fun AudioAndPlaybackScreen(
                 )
             }
 
-            // 4. Crossfade
+            // 4. Crossfade + Apple-Style Equal-Power Duration Slider (1s - 12s)
             item {
-                SettingsRowToggle(
-                    icon = Icons.Default.GraphicEq,
-                    title = "Crossfade",
-                    subtitle = "Blend the end of a track into the next",
-                    checked = state.crossfadeEnabled,
-                    onCheckedChange = { scope.launch { store.setCrossfade(it) } }
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .claySurface(borderRadius = 20.dp, backgroundColor = MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clayConcave(borderRadius = 12.dp, backgroundColor = MaterialTheme.colorScheme.surface),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Apple-Style Crossfade",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                if (state.crossfadeEnabled) "Active • ${state.crossfadeSeconds}s equal-power S-curve transition"
+                                else "Blend the end of a track into the next (works on online & local songs)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = state.crossfadeEnabled,
+                            onCheckedChange = {
+                                myplayerState?.autoCrossfade = it
+                                com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeEnabled = it
+                                scope.launch { store.setCrossfade(it) }
+                            }
+                        )
+                    }
+                    if (state.crossfadeEnabled) {
+                        Spacer(Modifier.height(10.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Crossfade Duration", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${state.crossfadeSeconds} sec", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        }
+                        Slider(
+                            value = state.crossfadeSeconds.toFloat(),
+                            onValueChange = { sec ->
+                                val s = sec.toInt().coerceIn(1, 12)
+                                myplayerState?.crossfadeLengthSec = s.toFloat()
+                                com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeSeconds = s.toFloat()
+                                scope.launch { store.setCrossfadeSeconds(s) }
+                            },
+                            valueRange = 1f..12f,
+                            steps = 10
+                        )
+                    }
+                }
             }
 
             // 5. Keep Screen Awake on Lyrics
@@ -378,6 +431,12 @@ fun AudioAndPlaybackScreen(
                     checked = state.claritySpatialBypass,
                     onCheckedChange = { scope.launch { store.setClaritySpatialBypass(it) } }
                 )
+            }
+
+            // 17. Phone-Mic Active Noise Cancellation (ANC) & Transparency Mode
+            item {
+                Spacer(Modifier.height(6.dp))
+                com.myplayer.app.ui.myplayer.MyPlayerAncSettingsCard()
             }
         }
     }
@@ -1012,8 +1071,8 @@ private fun Equalizer15BandScreen(
                         .padding(16.dp)
                 ) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("+8 dB (Boost)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                        Text("-8 dB (Cut)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        Text("+12 dB (Boost)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        Text("-12 dB (Cut)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                     }
                     Spacer(Modifier.height(12.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -1049,7 +1108,7 @@ private fun MyPlayerVerticalFader(
     modifier: Modifier = Modifier
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    val normalized = ((gainDb + 8f) / 16f).coerceIn(0f, 1f)
+    val normalized = ((gainDb + 12f) / 24f).coerceIn(0f, 1f)
     val latestGain by rememberUpdatedState(gainDb)
     val latestOnGainChange by rememberUpdatedState(onGainChange)
 
@@ -1300,6 +1359,6 @@ private fun SettingsRowToggle(
 private fun eqGainForTouch(y: Float, heightPx: Float, thumbPx: Float): Float {
     val travel = (heightPx - thumbPx).coerceAtLeast(1f)
     val fraction = (1f - (y - thumbPx / 2f) / travel).coerceIn(0f, 1f)
-    val raw = fraction * 16f - 8f
+    val raw = fraction * 24f - 12f
     return if (raw in -0.3f..0.3f) 0f else Math.round(raw * 2f) / 2f
 }
