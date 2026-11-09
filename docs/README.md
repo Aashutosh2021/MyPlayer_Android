@@ -1,34 +1,24 @@
-# MyPlayer Static Website
+# MyPlayer Website (Android & Windows Edition)
 
-Premium responsive static landing page for MyPlayer.
+Official responsive static landing page for MyPlayer on Android and Windows Desktop.
 
-## Theme
+## Features Covered
+- Direct YouTube link streaming & search
+- 9-Second progressive rolling chunk audio engine
+- Studio Master DSP & Audio Lab (10-Band Graphic EQ, Sub-Bass Boost, Stereo Widener, Analog Air Exciter)
+- Apple-grade AutoMix crossfade
+- 6 Now Playing visual styles (Radial, Vinyl, Poster, Waveform, Lyrics Stage, Classic)
+- DualBud Mode (Left/Right earbud audio split with instant swap) on Android & Windows
+- Compose Multiplatform Windows Desktop Edition with 48kHz hardware PCM & VLCJ decoding
+- Multi-device Wi-Fi Sync Play
+- Real-time synced lyrics (LRCLIB & offline `.lrc` companion files)
+- 1000×1000 Studio HD artwork
+- Buy Me a Coffee / UPI micro-donations (`gaashutoshgupta52-22@okaxis`)
 
-The visual system follows the actual MyPlayer Android implementation:
-
-- Night Background: `#171C26`
-- Night Surface: `#1F2633`
-- Night High Surface: `#2D3A4F`
-- Day Background: `#FFFFFF`
-- Day Surface: `#F3F5F8`
-- Primary Slate: `#6C7689`
-- Muted Silver: `#A4AAB7`
-- High-contrast inversion with client-side Day/Night toggle matching the app.
-
-## Automatic latest APK
-
+## Automatic Latest Package Discovery
 `script.js` calls the public GitHub Releases API for:
+- Android: `https://api.github.com/repos/Aashutosh2021/MyPlayer_Android/releases/latest`
+- Windows: `https://api.github.com/repos/Aashutosh2021/MyPlayer_Windows/releases/latest`
 
-`https://api.github.com/repos/Aashutosh2021/MyPlayer/releases/latest`
-
-It selects an APK from the current latest release. If multiple APKs exist, it prefers a filename containing `universal`, then `release`, then the first APK.
-
-No website code update is required when a new release is published.
-
-## GitHub Pages
-
-Enable GitHub Pages for the repository/folder containing:
-
-- `index.html`
-- `style.css`
-- `script.js`
+## Hosting & Deployment
+Configured for Firebase Hosting (`firebase.json` points to `docs/`) and compatible with GitHub Pages or Render Static Site.
