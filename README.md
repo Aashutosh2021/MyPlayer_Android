@@ -70,38 +70,52 @@
   <table align="center" width="100%">
     <tr>
       <td align="center" width="25%">
-        <b>Home Screen</b><br/><br/>
+        <b>Home &amp; Radial Arc</b><br/><br/>
         <img src="docs/screenshots/home_screen.jpg" alt="Home Screen" width="95%" />
       </td>
       <td align="center" width="25%">
-        <b>Now Playing (Radial)</b><br/><br/>
+        <b>Radial Now Playing</b><br/><br/>
         <img src="docs/screenshots/nowplaying.jpg" alt="Now Playing" width="95%" />
       </td>
+      <td align="center" width="25%">
+        <b>Custom Themes</b><br/><br/>
+        <img src="docs/screenshots/custom_player.jpg" alt="Custom Player Themes" width="95%" />
+      </td>
+      <td align="center" width="25%">
+        <b>Studio Equalizer</b><br/><br/>
+        <img src="docs/screenshots/equalizer.jpg" alt="Equalizer & Sound FX" width="95%" />
+      </td>
+    </tr>
+    <tr>
       <td align="center" width="25%">
         <b>Direct Link Search</b><br/><br/>
         <img src="docs/screenshots/search_screen.jpg" alt="Search Screen" width="95%" />
       </td>
       <td align="center" width="25%">
-        <b>Settings & Audio Lab</b><br/><br/>
-        <img src="docs/screenshots/settings_screen.jpg" alt="Settings Screen" width="95%" />
+        <b>Music Library</b><br/><br/>
+        <img src="docs/screenshots/library.jpg" alt="Library Screen" width="95%" />
       </td>
-    </tr>
-    <tr>
+      <td align="center" width="25%">
+        <b>Playlists &amp; Queue</b><br/><br/>
+        <img src="docs/screenshots/playlist_screen.jpg" alt="Playlist Screen" width="95%" />
+      </td>
       <td align="center" width="25%">
         <b>Offline Downloads</b><br/><br/>
         <img src="docs/screenshots/downloads_screen.jpg" alt="Downloads Screen" width="95%" />
       </td>
+    </tr>
+    <tr>
       <td align="center" width="25%">
-        <b>Playlists</b><br/><br/>
-        <img src="docs/screenshots/playlist_screen.jpg" alt="Playlist Screen" width="95%" />
-      </td>
-      <td align="center" width="25%">
-        <b>Library Collections</b><br/><br/>
-        <img src="docs/screenshots/library_playlist_screen.jpg" alt="Library Screen" width="95%" />
+        <b>Settings &amp; Audio Lab</b><br/><br/>
+        <img src="docs/screenshots/setting_screen.jpg" alt="Settings Screen" width="95%" />
       </td>
       <td align="center" width="25%">
         <b>Trending Hotlist</b><br/><br/>
         <img src="docs/screenshots/hotlist_screen.jpg" alt="Hotlist Screen" width="95%" />
+      </td>
+      <td align="center" width="50%" colspan="2">
+        <b>Miniplayer &amp; Persistent Navigation</b><br/><br/>
+        <img src="docs/screenshots/miniplayer_nav.jpg" alt="Miniplayer and Navigation Bar" width="95%" />
       </td>
     </tr>
   </table>
