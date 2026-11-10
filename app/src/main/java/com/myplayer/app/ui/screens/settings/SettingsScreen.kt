@@ -1365,9 +1365,9 @@ fun SettingsScreen(
 
                     icon = Icons.Filled.GraphicEq,
 
-                    title = "Audio & Playback Engine",
+                    title = "Audio & Streaming Output",
 
-                    subtitle = "15-Band EQ, Audio Lab FX, 7 Quality Tiers & Bit-Perfect",
+                    subtitle = "Equalizer, Audio FX Lab, 7 Quality Tiers & Bit-Perfect DAC",
 
                     onClick = {
 
@@ -1385,15 +1385,6 @@ fun SettingsScreen(
 
                 )
 
-                MyPlayerSettingsDivider()
-
-                MyPlayerSettingsDivider()
-                MyPlayerSettingsNavigationRow(
-                    icon = Icons.Filled.Tune,
-                    title = "Audio FX Lab & 10-Band Rainbow EQ",
-                    subtitle = "Reverb, 3D Spatial, AutoEQ (2500+ headphones), Slowed + Reverb & Apple Crossfade",
-                    onClick = onNavigateToMyPlayerAudioLab
-                )
                 MyPlayerSettingsDivider()
                 MyPlayerSettingsToggleRow(
                     icon = Icons.Filled.AutoAwesome,

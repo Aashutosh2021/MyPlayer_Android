@@ -267,7 +267,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
             navController = navController,
             startDestination = Screen.Home.route,
             enterTransition = {
-                slideInHorizontally(
+                if (!myplayerState.smoothAnimations) androidx.compose.animation.EnterTransition.None else slideInHorizontally(
                     initialOffsetX = { fullWidth -> fullWidth / 4 },
                     animationSpec = spring(
                         dampingRatio = Spring.DampingRatioNoBouncy,
@@ -282,7 +282,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 ) + fadeIn(tween(180))
             },
             exitTransition = {
-                scaleOut(
+                if (!myplayerState.smoothAnimations) androidx.compose.animation.ExitTransition.None else scaleOut(
                     targetScale = 0.94f,
                     animationSpec = tween(150)
                 ) + fadeOut(tween(150))

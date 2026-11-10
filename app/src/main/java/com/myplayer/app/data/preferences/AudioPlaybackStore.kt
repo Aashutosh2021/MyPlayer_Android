@@ -215,6 +215,10 @@ class AudioPlaybackStore @Inject constructor(
         if (!enabled) it[Keys.USB_EXCLUSIVE] = false
     }
     suspend fun setCrossfade(enabled: Boolean) = update { it[Keys.CROSSFADE] = enabled }
+    suspend fun setCrossfade(enabled: Boolean, seconds: Int) = update {
+        it[Keys.CROSSFADE] = enabled
+        it[Keys.CROSSFADE_SECONDS] = seconds.coerceIn(1, 12)
+    }
     suspend fun setCrossfadeSeconds(seconds: Int) = update { it[Keys.CROSSFADE_SECONDS] = seconds.coerceIn(1, 12) }
     suspend fun setKeepAwakeLyrics(enabled: Boolean) = update { it[Keys.KEEP_AWAKE_LYRICS] = enabled }
     suspend fun setDownloadSyncedLyrics(enabled: Boolean) = update { it[Keys.DOWNLOAD_LRC] = enabled }

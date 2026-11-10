@@ -45,6 +45,10 @@ import com.myplayer.app.ui.theme.ThemeState
 import com.myplayer.app.ui.theme.PureWhite
 import com.myplayer.app.ui.theme.SlateSecondary
 import com.myplayer.app.ui.theme.SilverMuted
+import com.myplayer.app.ui.myplayer.MyPlayerAnimatedCanvasOverlay
+import com.myplayer.app.ui.myplayer.MyPlayerAtmosphereBlurBox
+import com.myplayer.app.ui.myplayer.MyPlayerFormatBadge
+import com.myplayer.app.ui.myplayer.rememberMyPlayerUiStateHolder
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -109,8 +113,9 @@ fun NowPlayingVisual(
     )
 
     val isDark = ThemeState.isDarkMode
+    val myplayerState = rememberMyPlayerUiStateHolder()
 
-    val bgMain = if (isDark) PlayerBlack else PureWhite
+    val bgMain = if (isDark) (if (myplayerState.amoledBlack) Color.Black else PlayerBlack) else PureWhite
     val textPrimary = if (isDark) PlayerWhite else CharcoalPrimary
     val textMuted = if (isDark) PlayerMuted else SlateSecondary
     val controlPrimary = if (isDark) PlayerWhite else CharcoalPrimary
@@ -232,6 +237,17 @@ fun NowPlayingVisual(
                     )
             )
 
+            // Live Animated Canvas & Glass/Progressive Blur from Appearance Settings
+            MyPlayerAnimatedCanvasOverlay(
+                enabled = myplayerState.enableAnimatedCanvas,
+                isPlaying = isPlaying,
+                modifier = Modifier.fillMaxSize()
+            )
+            MyPlayerAtmosphereBlurBox(
+                state = myplayerState,
+                modifier = Modifier.fillMaxSize()
+            )
+
             // Top Bar: Back (<) and Options (...)
             Row(
                 modifier = Modifier
@@ -314,6 +330,10 @@ fun NowPlayingVisual(
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center
                 )
+                if (myplayerState.audioFormatBadge) {
+                    Spacer(Modifier.height(6.dp))
+                    MyPlayerFormatBadge(formatText = "HI-RES", sampleRateHz = 48000)
+                }
             }
 
             // ── 2. The Spherical Dome Console (Locked Arc on Circle Border) ──

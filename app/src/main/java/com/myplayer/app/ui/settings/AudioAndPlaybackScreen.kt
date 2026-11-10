@@ -136,7 +136,7 @@ fun AudioAndPlaybackScreen(
                     )
                 }
                 Text(
-                    "Audio & Playback",
+                    "Audio & Streaming Output",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -152,6 +152,35 @@ fun AudioAndPlaybackScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 100.dp)
         ) {
+            item {
+                Text(
+                    "Equalizer & Audio Lab FX",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp, start = 4.dp)
+                )
+            }
+
+            // 1. Equalizer (15-band hardware acoustic tuning)
+            item {
+                SettingsRowNav(
+                    icon = Icons.Default.Equalizer,
+                    title = "Equalizer",
+                    subtitle = "${if (state.eqEnabled) "On" else "Off"} • ${state.eqPreset.label} • 15-band hardware acoustic tuning",
+                    onClick = { currentSubScreen = SubScreen.EQUALIZER_15 }
+                )
+            }
+
+            // 2. Audio FX Lab (Apple Crossfade, Reverb, Spatial, Loudness, Speed/Pitch)
+            item {
+                SettingsRowNav(
+                    icon = Icons.Default.Tune,
+                    title = "Audio FX Lab",
+                    subtitle = "Apple Crossfade, Reverb, 3D Spatial, Loudness Boost, Speed & Pitch",
+                    onClick = { currentSubScreen = SubScreen.AUDIO_LAB }
+                )
+            }
+
             item {
                 Text(
                     "Audio & Streaming",
@@ -190,70 +219,6 @@ fun AudioAndPlaybackScreen(
                     checked = state.bitPerfectMode,
                     onCheckedChange = { scope.launch { store.setBitPerfect(it) } }
                 )
-            }
-
-            // 4. Crossfade + Apple-Style Equal-Power Duration Slider (1s - 12s)
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .claySurface(borderRadius = 20.dp, backgroundColor = MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clayConcave(borderRadius = 12.dp, backgroundColor = MaterialTheme.colorScheme.surface),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "Apple-Style Crossfade",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                if (state.crossfadeEnabled) "Active • ${state.crossfadeSeconds}s equal-power S-curve transition"
-                                else "Blend the end of a track into the next (works on online & local songs)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = state.crossfadeEnabled,
-                            onCheckedChange = {
-                                myplayerState?.autoCrossfade = it
-                                com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeEnabled = it
-                                scope.launch { store.setCrossfade(it) }
-                            }
-                        )
-                    }
-                    if (state.crossfadeEnabled) {
-                        Spacer(Modifier.height(10.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Crossfade Duration", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${state.crossfadeSeconds} sec", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
-                        }
-                        Slider(
-                            value = state.crossfadeSeconds.toFloat(),
-                            onValueChange = { sec ->
-                                val s = sec.toInt().coerceIn(1, 12)
-                                myplayerState?.crossfadeLengthSec = s.toFloat()
-                                com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeSeconds = s.toFloat()
-                                scope.launch { store.setCrossfadeSeconds(s) }
-                            },
-                            valueRange = 1f..12f,
-                            steps = 10
-                        )
-                    }
-                }
             }
 
             // 5. Keep Screen Awake on Lyrics
@@ -335,67 +300,14 @@ fun AudioAndPlaybackScreen(
                 )
             }
 
-            // 11. Loudness Normalization Dialog Trigger
-            item {
-                SettingsRowNav(
-                    icon = Icons.AutoMirrored.Filled.VolumeDown,
-                    title = "Loudness Normalization",
-                    subtitle = "${state.loudnessMode.title} • ${state.loudnessMode.description}",
-                    onClick = { showLoudnessDialog = true }
-                )
-            }
-
-            // 12. 15-Band Equalizer Screen Trigger
-            item {
-                SettingsRowNav(
-                    icon = Icons.Default.Equalizer,
-                    title = "Equalizer",
-                    subtitle = "${if (state.eqEnabled) "On" else "Off"} • ${state.eqPreset.label} • 15-band",
-                    onClick = { currentSubScreen = SubScreen.EQUALIZER_15 }
-                )
-            }
-
-            // 12b. Audio Lab & Effects
-            item {
-                SettingsRowNav(
-                    icon = Icons.Default.Tune,
-                    title = "Audio Lab & Effects",
-                    subtitle = "Reverb, Spatial Audio, Loudness Boost, Speed & Pitch",
-                    onClick = { currentSubScreen = SubScreen.AUDIO_LAB }
-                )
-            }
-
             // 13. System Audio Effects
             item {
                 SettingsRowToggle(
                     icon = Icons.Default.SurroundSound,
                     title = "System Audio Effects",
-                    subtitle = "Let Dolby / system equalizer process audio",
+                    subtitle = "Let OS / external equalizer process hardware audio session",
                     checked = state.systemAudioEffects,
                     onCheckedChange = { scope.launch { store.setSystemAudioEffects(it) } }
-                )
-            }
-
-            // 13b. Dolby Atmos & 3D Surround
-            item {
-                SettingsRowToggle(
-                    icon = Icons.Default.SurroundSound,
-                    title = "Dolby Atmos & 3D Surround",
-                    subtitle = if (state.dolbySurroundAtmos) "Active • Multichannel 5.1/7.1 Atmos binaural virtualizer"
-                    else "Off • Standard stereo downmix",
-                    checked = state.dolbySurroundAtmos,
-                    onCheckedChange = { scope.launch { store.setDolbySurroundAtmos(it) } }
-                )
-            }
-
-            // 13c. Headphone Spatial Audio & Soundstage
-            item {
-                SettingsRowNav(
-                    icon = Icons.Default.Hearing,
-                    title = "Headphone Spatial Audio (3D Soundstage)",
-                    subtitle = if (state.spatialAudioEnabled) "Active • ${state.spatialMode.title} • ${(state.spatialAmount * 100).toInt()}%"
-                    else "Off • Natural headphone stereo",
-                    onClick = { showSpatialDialog = true }
                 )
             }
 
@@ -431,12 +343,6 @@ fun AudioAndPlaybackScreen(
                     checked = state.claritySpatialBypass,
                     onCheckedChange = { scope.launch { store.setClaritySpatialBypass(it) } }
                 )
-            }
-
-            // 17. Phone-Mic Active Noise Cancellation (ANC) & Transparency Mode
-            item {
-                Spacer(Modifier.height(6.dp))
-                com.myplayer.app.ui.myplayer.MyPlayerAncSettingsCard()
             }
         }
     }
@@ -1071,8 +977,8 @@ private fun Equalizer15BandScreen(
                         .padding(16.dp)
                 ) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("+12 dB (Boost)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                        Text("-12 dB (Cut)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        Text("+8 dB (Boost)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        Text("-8 dB (Cut)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                     }
                     Spacer(Modifier.height(12.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -1108,7 +1014,7 @@ private fun MyPlayerVerticalFader(
     modifier: Modifier = Modifier
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    val normalized = ((gainDb + 12f) / 24f).coerceIn(0f, 1f)
+    val normalized = ((gainDb + 8f) / 16f).coerceIn(0f, 1f)
     val latestGain by rememberUpdatedState(gainDb)
     val latestOnGainChange by rememberUpdatedState(onGainChange)
 
@@ -1359,6 +1265,6 @@ private fun SettingsRowToggle(
 private fun eqGainForTouch(y: Float, heightPx: Float, thumbPx: Float): Float {
     val travel = (heightPx - thumbPx).coerceAtLeast(1f)
     val fraction = (1f - (y - thumbPx / 2f) / travel).coerceIn(0f, 1f)
-    val raw = fraction * 24f - 12f
+    val raw = fraction * 16f - 8f
     return if (raw in -0.3f..0.3f) 0f else Math.round(raw * 2f) / 2f
 }

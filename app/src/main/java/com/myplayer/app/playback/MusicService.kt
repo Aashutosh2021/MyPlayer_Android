@@ -57,6 +57,8 @@ class MusicService : MediaSessionService() {
     lateinit var masterAudioDspProcessor: MasterAudioDspProcessor
     @Inject
     lateinit var spatialAudioProcessor: SpatialAudioProcessor
+    @Inject
+    lateinit var cacheDataSourceFactory: androidx.media3.datasource.cache.CacheDataSource.Factory
 
     @Volatile private var currentAudioPlaybackState = AudioPlaybackState()
 
@@ -222,33 +224,37 @@ class MusicService : MediaSessionService() {
         // MyPlayer Audio FX Speed & Pitch live bridge hook (dispatched safely on Main thread)
 
         // Master Audio & Playback Feature Integration:
-        // 1. Apple Music-style Equal-Power Crossfade engine monitor (works for both local & online queues!)
+        // 1. Crossfade engine monitor (synced live with Audio FX Lab & AudioPlaybackStore)
+        com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.attachMasterDsp(masterAudioDspProcessor)
+        com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.onUpdateCrossfadeConfig = { enabled, seconds ->
+            serviceScope.launch {
+                runCatching { audioPlaybackStore.setCrossfade(enabled, seconds) }
+            }
+        }
         audioFeatureManagers.attachCrossfadeMonitor(
             scope = serviceScope,
             exoPlayer = player,
             isEnabled = {
                 currentAudioPlaybackState.crossfadeEnabled ||
-                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeEnabled
+                    com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.isAnyCrossfadeActive
             },
             crossfadeDurationSec = currentAudioPlaybackState.crossfadeSeconds,
             crossfadeSecondsProvider = {
-                if (com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeEnabled) {
+                if (com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.isAnyCrossfadeActive) {
                     com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeSeconds
                 } else {
                     currentAudioPlaybackState.crossfadeSeconds.toFloat()
                 }
             },
+            dataSourceFactory = cacheDataSourceFactory,
             onTriggerNextTrack = {
-                playbackEventBus.emit(PlaybackEvent.SkipToNextRequested)
+                if (player.mediaItemCount > 1 && player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem()
+                } else {
+                    playbackEventBus.emit(PlaybackEvent.SkipToNextRequested)
+                }
             }
         )
-
-        com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.onUpdateCrossfadeConfig = { enabled, seconds ->
-            serviceScope.launch {
-                audioPlaybackStore.setCrossfade(enabled)
-                audioPlaybackStore.setCrossfadeSeconds(seconds)
-            }
-        }
 
         // 2. Observe Master Audio & Playback Preferences (15-Band EQ, Studio Master Clarity, -14 LUFS, Bit-Perfect)
         serviceScope.launch {

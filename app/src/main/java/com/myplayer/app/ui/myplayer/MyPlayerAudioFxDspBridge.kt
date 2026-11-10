@@ -62,6 +62,10 @@ object MyPlayerAudioFxDspBridge {
     @Volatile var keepGaplessAlbums: Boolean = true
     @Volatile var pauseFadeEnabled: Boolean = true
     @Volatile var pauseFadeSeconds: Float = 2.0f
+    val pauseFadeDurationSec: Float get() = pauseFadeSeconds
+
+    val isAnyCrossfadeActive: Boolean
+        get() = crossfadeEnabled
 
     // ---- Speed / pitch: applied through ExoPlayer PlaybackParameters ----
     private var lastSpeed = 1.0f
@@ -75,6 +79,14 @@ object MyPlayerAudioFxDspBridge {
         }
 
     var onUpdateCrossfadeConfig: ((enabled: Boolean, seconds: Int) -> Unit)? = null
+        set(value) {
+            field = value
+            value?.invoke(crossfadeEnabled, crossfadeSeconds.toInt().coerceIn(1, 12))
+        }
+
+    fun getInterpolated15BandGains(): FloatArray {
+        return MasterAudioDspProcessor.map10BandsTo15Bands(eqGainsDb)
+    }
 
     private var audioFx: AudioFxService? = null
     private var masterDsp: MasterAudioDspProcessor? = null
