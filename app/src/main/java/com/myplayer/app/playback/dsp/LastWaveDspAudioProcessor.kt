@@ -46,12 +46,17 @@ class LastWaveDspAudioProcessor @Inject constructor() : BaseAudioProcessor() {
     }
 
     private fun calculateHighShelfCoeffs(sampleRate: Int, freq: Float, gainDb: Float) {
+        updateBiquadCoefficients(sampleRate, freq, gainDb)
+    }
+
+    private fun updateBiquadCoefficients(sampleRate: Int, freq: Float, gainDb: Float) {
         if (gainDb == 0f) {
             b0 = 1f; b1 = 0f; b2 = 0f; a1 = 0f; a2 = 0f
             return
         }
+        val safeFreq = if (sampleRate > 0) minOf(3800f, sampleRate * 0.45f) else freq
         val a = 10.0.pow(gainDb / 40.0).toFloat()
-        val w0 = (2.0 * Math.PI * freq / sampleRate).toFloat()
+        val w0 = (2.0 * Math.PI * safeFreq / sampleRate).toFloat()
         val cosW0 = cos(w0)
         val alpha = sin(w0) / 2f * sqrt(2f)
 
@@ -82,12 +87,19 @@ class LastWaveDspAudioProcessor @Inject constructor() : BaseAudioProcessor() {
 
             // 1. Apply Clarity High-Shelf Biquad Filter
             if (clarityPreset != ClarityPreset.OFF) {
-                val outL = b0 * left + b1 * x1L + b2 * x2L - a1 * y1L - a2 * y2L
-                x2L = x1L; x1L = left; y2L = y1L; y1L = outL
-                left = outL
+                var outL = b0 * left + b1 * x1L + b2 * x2L - a1 * y1L - a2 * y2L
+                var outR = b0 * right + b1 * x1R + b2 * x2R - a1 * y1R - a2 * y2R
 
-                val outR = b0 * right + b1 * x1R + b2 * x2R - a1 * y1R - a2 * y2R
-                x2R = x1R; x1R = right; y2R = y1R; y1R = outR
+                if (outL.isNaN() || outL.isInfinite() || outR.isNaN() || outR.isInfinite()) {
+                    x1L = 0f; x2L = 0f; y1L = 0f; y2L = 0f
+                    x1R = 0f; x2R = 0f; y1R = 0f; y2R = 0f
+                    outL = 0f
+                    outR = 0f
+                } else {
+                    x2L = x1L; x1L = left; y2L = y1L; y1L = outL
+                    x2R = x1R; x1R = right; y2R = y1R; y1R = outR
+                }
+                left = outL
                 right = outR
             }
 
@@ -99,13 +111,17 @@ class LastWaveDspAudioProcessor @Inject constructor() : BaseAudioProcessor() {
                 right = mid - side
             }
 
+            if (left.isNaN() || left.isInfinite()) left = 0f
+            if (right.isNaN() || right.isInfinite()) right = 0f
+
             // Soft-clipping limiter to prevent digital distortion
-            val clampedL = (left.coerceIn(-0.99f, 0.99f) * 32767f).toInt().toShort()
-            val clampedR = (right.coerceIn(-0.99f, 0.99f) * 32767f).toInt().toShort()
+            val clampedL = (left.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+            val clampedR = (right.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
 
             outputBuffer.putShort(clampedL)
             outputBuffer.putShort(clampedR)
         }
+        if (inputBuffer.hasRemaining()) inputBuffer.position(inputBuffer.limit())
         outputBuffer.flip()
     }
 }

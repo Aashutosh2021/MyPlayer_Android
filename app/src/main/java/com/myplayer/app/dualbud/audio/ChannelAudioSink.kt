@@ -113,10 +113,9 @@ class ChannelAudioSink(
         }
 
         val tempShorts = ShortArray(minOf(totalShorts, DualChannelMixer.CHUNK_FRAMES * sourceChannelCount))
-        shortBuffer.get(tempShorts)
-        buffer.position(buffer.position() + tempShorts.size * 2)
+        shortBuffer.duplicate().get(tempShorts)
 
-        mixer.enqueueSamples(
+        val writtenSamples = mixer.enqueueSamples(
             channel = channelId,
             inputPcm = tempShorts,
             offset = 0,
@@ -124,6 +123,7 @@ class ChannelAudioSink(
             sourceSampleRate = sourceSampleRate,
             sourceChannels = sourceChannelCount
         )
+        buffer.position(buffer.position() + writtenSamples * 2)
 
         return !buffer.hasRemaining()
     }

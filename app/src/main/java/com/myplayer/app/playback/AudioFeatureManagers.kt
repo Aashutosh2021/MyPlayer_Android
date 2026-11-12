@@ -309,4 +309,15 @@ class AudioFeatureManagers @Inject constructor(
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
     }
+
+    fun release() {
+        tailFadeJob?.cancel()
+        tailFadeJob = null
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        runCatching {
+            tailPlayer?.release()
+        }
+        tailPlayer = null
+    }
 }

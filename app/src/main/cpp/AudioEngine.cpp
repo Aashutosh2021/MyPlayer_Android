@@ -82,18 +82,26 @@ Java_com_myplayer_app_playback_dsp_MasterAudioDspProcessor_nativeProcessPcmFloat
     auto *base = static_cast<uint8_t *>(env->GetDirectBufferAddress(directBuffer));
     if (base == nullptr) return;
 
+    const jlong capacity = env->GetDirectBufferCapacity(directBuffer);
+    const size_t totalSamples = static_cast<size_t>(frameCount) * static_cast<size_t>(channelCount);
+    const size_t requiredBytes = totalSamples * sizeof(float);
+    if (byteOffset < 0 || capacity < 0 ||
+        static_cast<size_t>(byteOffset) + requiredBytes > static_cast<size_t>(capacity)) {
+        return;
+    }
+
     auto *samples = reinterpret_cast<float *>(base + byteOffset);
 
     // Apply loudness / preamp gain if non-unity
     const float loudness = gLoudnessGainLinear.load(std::memory_order_relaxed);
     if (std::abs(loudness - 1.0f) > 0.0001f) {
-        const size_t totalSamples = static_cast<size_t>(frameCount) * static_cast<size_t>(channelCount);
         for (size_t i = 0; i < totalSamples; ++i) {
             samples[i] *= loudness;
         }
     }
 
     // Process with the real LastWave DspProcessor!
+    std::lock_guard<std::mutex> lock(gConfigMutex);
     gDsp.process(samples, frameCount, channelCount);
 }
 
@@ -113,8 +121,15 @@ Java_com_myplayer_app_playback_dsp_MasterAudioDspProcessor_nativeProcessPcm16(
     auto *base = static_cast<uint8_t *>(env->GetDirectBufferAddress(directBuffer));
     if (base == nullptr) return;
 
-    auto *samples = reinterpret_cast<int16_t *>(base + byteOffset);
+    const jlong capacity = env->GetDirectBufferCapacity(directBuffer);
     const size_t totalSamples = static_cast<size_t>(frameCount) * static_cast<size_t>(channelCount);
+    const size_t requiredBytes = totalSamples * sizeof(int16_t);
+    if (byteOffset < 0 || capacity < 0 ||
+        static_cast<size_t>(byteOffset) + requiredBytes > static_cast<size_t>(capacity)) {
+        return;
+    }
+
+    auto *samples = reinterpret_cast<int16_t *>(base + byteOffset);
 
     thread_local std::vector<float> scratch;
     if (scratch.size() < totalSamples) {
@@ -136,11 +151,15 @@ Java_com_myplayer_app_playback_dsp_MasterAudioDspProcessor_nativeProcessPcm16(
     }
 
     // Process with the real LastWave DspProcessor!
-    gDsp.process(scratch.data(), frameCount, channelCount);
+    {
+        std::lock_guard<std::mutex> lock(gConfigMutex);
+        gDsp.process(scratch.data(), frameCount, channelCount);
+    }
 
     // Convert Float32 -> Int16
     for (size_t i = 0; i < totalSamples; ++i) {
         const float f = scratch[i];
-        samples[i] = static_cast<int16_t>(std::clamp(std::lrintf(f * 32767.0f), -32768L, 32767L));
+        const float safeSample = std::isfinite(f) ? std::clamp(f, -1.0f, 1.0f) : 0.0f;
+        samples[i] = static_cast<int16_t>(std::clamp(std::lrintf(safeSample * 32767.0f), -32768L, 32767L));
     }
 }

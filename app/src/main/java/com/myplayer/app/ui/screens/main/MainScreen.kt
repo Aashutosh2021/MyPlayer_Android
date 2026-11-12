@@ -91,6 +91,26 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     val displayArtist = currentSong?.artist ?: currentOnlineSong?.artist
     val displayArt = currentSong?.albumArt ?: currentOnlineSong?.thumbnailUrl
 
+    // Firebase Remote Notifications auto-polling & runtime permission request
+    LaunchedEffect(Unit) {
+        com.myplayer.app.ui.myplayer.MyPlayerRemoteNotificationManager.requestNotificationPermissionIfNeeded(context as? android.app.Activity)
+        com.myplayer.app.ui.myplayer.MyPlayerRemoteNotificationManager.startAutoPolling(context)
+    }
+
+    // Funny mood / vibe-check streak tracker
+    LaunchedEffect(displayTitle, displayArtist, isPlaying) {
+        val title = displayTitle ?: ""
+        val artist = displayArtist ?: ""
+        val album = currentSong?.album ?: ""
+        if (isPlaying && title.isNotBlank()) {
+            viewModel.currentPosition.collect {
+                com.myplayer.app.ui.myplayer.MyPlayerVibeCheckManager.onPlaybackTick(title, artist, album, isPlaying)
+            }
+        } else {
+            com.myplayer.app.ui.myplayer.MyPlayerVibeCheckManager.onPlaybackTick(title, artist, album, isPlaying)
+        }
+    }
+
     val isOnNowPlaying = currentRoute == Screen.NowPlaying.route
 
     // Routes where the nav bar should be hidden
@@ -189,6 +209,14 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 com.myplayer.app.ui.myplayer.MyPlayerRemoteNotificationManager.dismissActivePopup()
                 navigateToBottomTab(Screen.Settings.route)
             }
+        )
+    }
+
+    com.myplayer.app.ui.myplayer.MyPlayerVibeCheckManager.activePopup?.let { event ->
+        com.myplayer.app.ui.myplayer.MyPlayerVibeCheckPopupDialog(
+            event = event,
+            onDismiss = { com.myplayer.app.ui.myplayer.MyPlayerVibeCheckManager.dismissPopup() },
+            onSwitchVibeClick = { viewModel.skipToNext() }
         )
     }
 

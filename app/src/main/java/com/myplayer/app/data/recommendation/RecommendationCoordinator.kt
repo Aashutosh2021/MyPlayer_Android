@@ -83,6 +83,7 @@ open class RecommendationCoordinator internal constructor(
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val autoplayMutex = kotlinx.coroutines.sync.Mutex()
 
     init {
         // Collect playback events to seed recommendations and drive safe autoplay
@@ -164,50 +165,55 @@ open class RecommendationCoordinator internal constructor(
     }
 
     private suspend fun triggerAutoplay() {
-        val isAutoplayEnabled = settingsDataStore.isAutoplayEnabled.firstOrNull() ?: true
-        if (!isAutoplayEnabled) {
-            Log.d(TAG, "AUTOPLAY_SKIPPED: Autoplay is disabled by user settings")
-            logger.logEvent("AUTOPLAY_SKIPPED", mapOf("reason" to "DisabledInSettings"))
-            return
-        }
-
-        if (!isNetworkAvailable()) {
-            Log.w(TAG, "AUTOPLAY_SKIPPED: Network unavailable for recommendation autoplay")
-            logger.logEvent("AUTOPLAY_SKIPPED", mapOf("reason" to "NetworkUnavailable"))
-            return
-        }
-
-        var nextSong = queueManager.dequeue()
-
-        // If queue was empty, attempt synchronous recovery
-        if (nextSong == null) {
-            Log.d(TAG, "Queue empty during autoplay, attempting recovery...")
-            val recovered = queueManager.recoverQueueSynchronously()
-            if (recovered) {
-                nextSong = queueManager.dequeue()
+        if (!autoplayMutex.tryLock()) return
+        try {
+            val isAutoplayEnabled = settingsDataStore.isAutoplayEnabled.firstOrNull() ?: true
+            if (!isAutoplayEnabled) {
+                Log.d(TAG, "AUTOPLAY_SKIPPED: Autoplay is disabled by user settings")
+                logger.logEvent("AUTOPLAY_SKIPPED", mapOf("reason" to "DisabledInSettings"))
+                return
             }
-        }
 
-        if (nextSong != null) {
-            Log.i(TAG, "AUTOPLAY_RECOMMENDATION_SELECTED: Next track -> ${nextSong.title} by ${nextSong.artist} (${nextSong.videoId})")
-            logger.logEvent("AUTOPLAY_RECOMMENDATION_SELECTED", mapOf(
-                "videoId" to nextSong.videoId,
-                "title" to nextSong.title,
-                "artist" to nextSong.artist,
-                "source" to nextSong.source
-            ))
+            if (!isNetworkAvailable()) {
+                Log.w(TAG, "AUTOPLAY_SKIPPED: Network unavailable for recommendation autoplay")
+                logger.logEvent("AUTOPLAY_SKIPPED", mapOf("reason" to "NetworkUnavailable"))
+                return
+            }
 
-            val playRequest = playbackRepository.preparePlayRequest(nextSong)
-            playbackEventBus.emit(
-                PlaybackEvent.PlayRequestReady(
-                    requests = listOf(playRequest),
-                    startIndex = 0
+            var nextSong = queueManager.dequeue()
+
+            // If queue was empty, attempt synchronous recovery
+            if (nextSong == null) {
+                Log.d(TAG, "Queue empty during autoplay, attempting recovery...")
+                val recovered = queueManager.recoverQueueSynchronously()
+                if (recovered) {
+                    nextSong = queueManager.dequeue()
+                }
+            }
+
+            if (nextSong != null) {
+                Log.i(TAG, "AUTOPLAY_RECOMMENDATION_SELECTED: Next track -> ${nextSong.title} by ${nextSong.artist} (${nextSong.videoId})")
+                logger.logEvent("AUTOPLAY_RECOMMENDATION_SELECTED", mapOf(
+                    "videoId" to nextSong.videoId,
+                    "title" to nextSong.title,
+                    "artist" to nextSong.artist,
+                    "source" to nextSong.source
+                ))
+
+                val playRequest = playbackRepository.preparePlayRequest(nextSong)
+                playbackEventBus.emit(
+                    PlaybackEvent.PlayRequestReady(
+                        requests = listOf(playRequest),
+                        startIndex = 0
+                    )
                 )
-            )
-            prefetchUpcomingRecommendationStream()
-        } else {
-            Log.w(TAG, "AUTOPLAY_SKIPPED: No recommendation candidates available")
-            logger.logEvent("AUTOPLAY_SKIPPED", mapOf("reason" to "NoCandidatesAvailable"))
+                prefetchUpcomingRecommendationStream()
+            } else {
+                Log.w(TAG, "AUTOPLAY_SKIPPED: No recommendation candidates available")
+                logger.logEvent("AUTOPLAY_SKIPPED", mapOf("reason" to "NoCandidatesAvailable"))
+            }
+        } finally {
+            autoplayMutex.unlock()
         }
     }
 
@@ -242,13 +248,14 @@ open class RecommendationCoordinator internal constructor(
 
     suspend fun playRecommendation(song: com.myplayer.app.data.recommendation.model.RecommendationSong): OnlineSong? {
         queueManager.acceptSong(song.videoId)
+        val totalSec = (song.durationMs / 1000).coerceAtLeast(0)
         return OnlineSong(
             videoId = song.videoId,
             title = song.title,
             artist = song.artist,
             thumbnailUrl = song.thumbnailUrl,
             durationMs = song.durationMs,
-            durationText = song.durationMs.toString(),
+            durationText = "%d:%02d".format(totalSec / 60, totalSec % 60),
             streamUrl = "online://${song.videoId}"
         )
     }

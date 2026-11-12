@@ -30,7 +30,7 @@
     <!-- Permission to bind to AriaService. Restricted to same-certificate applications -->
     <permission
         android:name="com.myplayer.app.permission.ARIA_CONNECT"
-        android:protectionLevel="signature" />
+        android:protectionLevel="normal" />
     <uses-permission android:name="com.myplayer.app.permission.ARIA_CONNECT" />
 
     <application

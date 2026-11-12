@@ -83,8 +83,9 @@ class LastFmTrackMatcher @Inject constructor(
             var score = 0
 
             // 1. Artist matching
-            val artistMatches = cleanCandArtist.contains(cleanExpectedArtist) ||
-                                cleanExpectedArtist.contains(cleanCandArtist)
+            val artistMatches = cleanExpectedArtist.isNotBlank() && cleanCandArtist.isNotBlank() && (
+                                cleanCandArtist.contains(cleanExpectedArtist) ||
+                                cleanExpectedArtist.contains(cleanCandArtist))
             if (artistMatches) {
                 score += 40
             } else {
@@ -97,8 +98,9 @@ class LastFmTrackMatcher @Inject constructor(
             }
 
             // 2. Title matching
-            val titleMatches = cleanCandTitle.contains(cleanExpectedTitle) ||
-                               cleanExpectedTitle.contains(cleanCandTitle)
+            val titleMatches = cleanExpectedTitle.isNotBlank() && cleanCandTitle.isNotBlank() && (
+                               cleanCandTitle.contains(cleanExpectedTitle) ||
+                               cleanExpectedTitle.contains(cleanCandTitle))
             if (titleMatches) {
                 score += 40
             } else {
@@ -133,7 +135,7 @@ class LastFmTrackMatcher @Inject constructor(
 
     private fun cleanString(input: String): String {
         return input.lowercase()
-            .replace(Regex("[^a-z0-9 ]"), " ")
+            .replace(Regex("[^\\p{L}\\p{N} ]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
     }

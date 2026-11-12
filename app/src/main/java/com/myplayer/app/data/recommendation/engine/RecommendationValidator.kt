@@ -19,6 +19,7 @@ class RecommendationValidator @Inject constructor(
     ): List<RecommendationSong> {
         val seenIds = mutableSetOf<String>()
         val validSongs = mutableListOf<RecommendationSong>()
+        val cleanSeedId = seed.songId.removePrefix("online://").trim()
 
         for (candidate in candidates) {
             // Reject: Null/Blank IDs
@@ -28,7 +29,7 @@ class RecommendationValidator @Inject constructor(
             }
 
             // Reject: Current playing song
-            if (seed.songId.isNotBlank() && candidate.videoId == seed.songId) {
+            if (candidate.videoId == seed.songId || (cleanSeedId.isNotBlank() && candidate.videoId == cleanSeedId)) {
                 // This is expected, no need to log as failure unless verbose
                 continue
             }

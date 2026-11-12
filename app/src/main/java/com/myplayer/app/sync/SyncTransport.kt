@@ -47,6 +47,7 @@ class LanServerTransport : SyncTransport {
     private val clientSockets = CopyOnWriteArrayList<Socket>()
     private val clientWriters = CopyOnWriteArrayList<OutputStream>()
     private val transportScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val sendMutex = kotlinx.coroutines.sync.Mutex()
 
     override fun events(): Flow<TransportEvent> = callbackFlow {
         var boundPort = -1
@@ -140,32 +141,37 @@ class LanServerTransport : SyncTransport {
     }.flowOn(Dispatchers.IO)
 
     override suspend fun send(message: SyncMessage): Boolean = withContext(Dispatchers.IO) {
-        if (clientWriters.isEmpty()) {
-            Log.w(TAG, "Server send failed: no active client writers")
-            return@withContext false
-        }
-        val encoded = SyncMessageCodec.encode(message) + "\n"
-        val bytes = encoded.toByteArray(Charsets.UTF_8)
-        Log.d(TAG, "Server broadcasting to ${clientWriters.size} client(s): ${message.javaClass.simpleName}")
-        var anySuccess = false
-        val iterator = clientWriters.iterator()
-        while (iterator.hasNext()) {
-            val out = iterator.next()
-            try {
-                out.write(bytes)
-                out.flush()
-                anySuccess = true
-            } catch (e: IOException) {
-                Log.w(TAG, "Server error writing to client writer: ${e.message}")
+        sendMutex.lock()
+        try {
+            if (clientWriters.isEmpty()) {
+                Log.w(TAG, "Server send failed: no active client writers")
+                return@withContext false
             }
+            val encoded = SyncMessageCodec.encode(message) + "\n"
+            val bytes = encoded.toByteArray(Charsets.UTF_8)
+            Log.d(TAG, "Server broadcasting to ${clientWriters.size} client(s): ${message.javaClass.simpleName}")
+            var anySuccess = false
+            val iterator = clientWriters.iterator()
+            while (iterator.hasNext()) {
+                val out = iterator.next()
+                try {
+                    out.write(bytes)
+                    out.flush()
+                    anySuccess = true
+                } catch (e: IOException) {
+                    Log.w(TAG, "Server error writing to client writer: ${e.message}")
+                }
+            }
+            anySuccess
+        } finally {
+            sendMutex.unlock()
         }
-        anySuccess
     }
 
     override fun close() = closeInternal()
 
     private fun closeInternal() {
-        transportScope.cancel()
+        transportScope.coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
         for (s in clientSockets) {
             try { s.close() } catch (_: IOException) {}
         }
@@ -184,6 +190,7 @@ class LanClientTransport(
 
     private var socket: Socket? = null
     @Volatile private var writer: OutputStream? = null
+    private val sendMutex = kotlinx.coroutines.sync.Mutex()
 
     override fun events(): Flow<TransportEvent> = callbackFlow {
         try {
@@ -201,14 +208,16 @@ class LanClientTransport(
             Log.d(TAG, "Client attempting connection to $host, ports to try: $portsToTry")
 
             portLoop@ for (targetPort in portsToTry) {
+                if (targetPort !in 1..65535) continue
+                val s = Socket()
                 try {
-                    val s = Socket()
                     s.tcpNoDelay = true
                     s.connect(InetSocketAddress(host, targetPort), CONNECT_TIMEOUT_MS)
                     connectedSocket = s
                     Log.d(TAG, "Client successfully connected to $host:$targetPort")
                     break@portLoop
                 } catch (e: IOException) {
+                    try { s.close() } catch (_: Exception) {}
                     connectError = e
                     Log.d(TAG, "Connection to $host:$targetPort failed: ${e.message}")
                 }
@@ -249,19 +258,24 @@ class LanClientTransport(
     }.flowOn(Dispatchers.IO)
 
     override suspend fun send(message: SyncMessage): Boolean = withContext(Dispatchers.IO) {
-        val out = writer ?: run {
-            Log.w(TAG, "Client send failed: no active socket writer")
-            return@withContext false
-        }
+        sendMutex.lock()
         try {
-            val encoded = SyncMessageCodec.encode(message) + "\n"
-            Log.d(TAG, "Client sending: ${message.javaClass.simpleName}")
-            out.write(encoded.toByteArray(Charsets.UTF_8))
-            out.flush()
-            true
-        } catch (e: IOException) {
-            Log.w(TAG, "Client send error", e)
-            false
+            val out = writer ?: run {
+                Log.w(TAG, "Client send failed: no active socket writer")
+                return@withContext false
+            }
+            try {
+                val encoded = SyncMessageCodec.encode(message) + "\n"
+                Log.d(TAG, "Client sending: ${message.javaClass.simpleName}")
+                out.write(encoded.toByteArray(Charsets.UTF_8))
+                out.flush()
+                true
+            } catch (e: IOException) {
+                Log.w(TAG, "Client send error", e)
+                false
+            }
+        } finally {
+            sendMutex.unlock()
         }
     }
 

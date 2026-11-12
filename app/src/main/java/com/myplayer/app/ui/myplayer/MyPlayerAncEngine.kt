@@ -199,6 +199,7 @@ object MyPlayerAncManager {
                 try {
                     record.release()
                 } catch (_: Throwable) {}
+                running = false
                 ringBuffer.fill(0f)
             }
         }

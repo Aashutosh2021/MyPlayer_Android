@@ -59,8 +59,9 @@ class DownloadWorker @AssistedInject constructor(
                 }
             )
         }
+        val notifId = NOTIF_ID + (inputData.getString(KEY_VIDEO_ID)?.hashCode()?.and(0xFFFF) ?: 0)
         return ForegroundInfo(
-            NOTIF_ID,
+            notifId,
             NotificationCompat.Builder(applicationContext, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setContentTitle("Downloading Song")
@@ -157,14 +158,14 @@ class DownloadWorker @AssistedInject constructor(
             val hasCustomFolder = !customFolderUriString.isNullOrEmpty()
 
             val safeTitle = title
-                .replace(Regex("[^a-zA-Z0-9 _\\-]"), "")
+                .replace(Regex("[^\\p{L}\\p{N} _\\-]"), "")
                 .replace(Regex(" {2,}"), " ")
                 .trim()
                 .take(60)
-                .ifBlank { videoId }
 
-            val finalFileName = "$safeTitle.m4a"
-            val tmpFileName = "$safeTitle.tmp"
+            val cleanTitle = safeTitle.ifBlank { "track" }
+            val finalFileName = "$cleanTitle [$videoId].m4a"
+            val tmpFileName = "$cleanTitle [$videoId].tmp"
 
             val existing = downloadedSongDao.getById(videoId)
             if (existing != null &&
@@ -190,11 +191,8 @@ class DownloadWorker @AssistedInject constructor(
                     .build()
                 okHttpClient.newCall(headReq).execute().use { response ->
                     val cr = response.header("Content-Range")
-                    if (cr != null) {
-                        totalSize = cr.substringAfterLast("/").toLongOrNull() ?: -1L
-                    } else if (response.isSuccessful) {
-                        totalSize = response.body?.contentLength() ?: -1L
-                    }
+                    totalSize = cr?.substringAfterLast('/')?.toLongOrNull()
+                        ?: (if (response.isSuccessful) response.body?.contentLength() ?: -1L else -1L)
                 }
             } catch (e: Exception) {
                 Log.e("DownloadWorker", "Failed to fetch file size", e)
@@ -202,6 +200,7 @@ class DownloadWorker @AssistedInject constructor(
 
             suspend fun downloadToStream(out: java.io.OutputStream, startOffset: Long): Long {
                 var downloaded = startOffset
+                var serverIgnoredRange = false
                 while (true) {
                     if (isStopped) throw IOException("Stopped by user")
                     val endOffset = if (totalSize > 0) minOf(downloaded + CHUNK_SIZE - 1, totalSize - 1) else downloaded + CHUNK_SIZE - 1
@@ -218,8 +217,11 @@ class DownloadWorker @AssistedInject constructor(
 
                             bytesReadThisChunk = withContext(Dispatchers.IO) {
                                 okHttpClient.newCall(req).execute().use { response ->
-                                    if (response.code == 416) return@withContext -1L
+                                    if (response.code == 416) return@use -1L
                                     if (!response.isSuccessful && response.code != 206) throw IOException("HTTP ${response.code}")
+                                    if (response.code == 200) {
+                                        serverIgnoredRange = true
+                                    }
                                     val body = response.body ?: throw IOException("Empty body")
                                     val stream = body.byteStream()
                                     val buf = ByteArray(8192)
@@ -251,6 +253,7 @@ class DownloadWorker @AssistedInject constructor(
                         setProgress(workDataOf(KEY_PROGRESS to 50))
                     }
 
+                    if (serverIgnoredRange) break
                     if (totalSize > 0 && downloaded >= totalSize) break
                     if (bytesReadThisChunk < CHUNK_SIZE && totalSize == -1L) break
                 }

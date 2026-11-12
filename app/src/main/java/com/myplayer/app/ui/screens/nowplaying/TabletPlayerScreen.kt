@@ -692,7 +692,7 @@ private fun TabletProgressBar(
                 // Vertical pill / rounded cursor thumb
                 val thumbWidth = 4.dp.toPx()
                 val thumbHeight = 18.dp.toPx()
-                val thumbX = (activeWidth - thumbWidth / 2).coerceIn(0f, size.width - thumbWidth)
+                val thumbX = (activeWidth - thumbWidth / 2).coerceIn(0f, (size.width - thumbWidth).coerceAtLeast(0f))
                 drawRoundRect(
                     color = TextWhite,
                     topLeft = Offset(thumbX, centerY - thumbHeight / 2),
@@ -812,7 +812,7 @@ private fun TabletVolumeBar(
                 // Vertical thumb
                 val thumbWidth = 4.dp.toPx()
                 val thumbHeight = 16.dp.toPx()
-                val thumbX = (activeWidth - thumbWidth / 2).coerceIn(0f, size.width - thumbWidth)
+                val thumbX = (activeWidth - thumbWidth / 2).coerceIn(0f, (size.width - thumbWidth).coerceAtLeast(0f))
                 drawRoundRect(
                     color = AccentBlue,
                     topLeft = Offset(thumbX, centerY - thumbHeight / 2),

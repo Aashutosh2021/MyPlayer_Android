@@ -90,7 +90,7 @@ class DownloadRepository @Inject constructor(
     }
 
     fun getDownloadedById(id: String): Flow<List<DownloadedSongEntity>> =
-        downloadedSongDao.searchDownloads("")
+        downloadedSongDao.searchDownloads(id)
 
     /**
      * Schedules an expedited background download for the given [song].
@@ -126,7 +126,7 @@ class DownloadRepository @Inject constructor(
         return try {
             WorkManager.getInstance(context).enqueueUniqueWork(
                 "download_${song.videoId}",
-                ExistingWorkPolicy.KEEP,   // Don't cancel a running download if same song is enqueued again
+                ExistingWorkPolicy.REPLACE,
                 request
             )
             Log.i("DownloadRepository", "[DOWNLOAD] Successfully enqueued WorkManager job for: ${song.videoId}")

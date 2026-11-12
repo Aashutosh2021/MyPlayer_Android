@@ -70,7 +70,7 @@ class MusicController @Inject constructor(
     private var mediaController: MediaController? = null
 
     // Keep a local copy of the queue so we can map MediaItem → SongEntity
-    private val _songQueue = mutableListOf<SongEntity>()
+    private val _songQueue: MutableList<SongEntity> = java.util.Collections.synchronizedList(mutableListOf<SongEntity>())
     private val _playbackQueue = MutableStateFlow<List<SongEntity>>(emptyList())
     val playbackQueue: StateFlow<List<SongEntity>> = _playbackQueue.asStateFlow()
 
@@ -566,6 +566,7 @@ class MusicController @Inject constructor(
         if (playbackStateManager.repeatMode.value == Player.REPEAT_MODE_ALL && _songQueue.isNotEmpty()) {
             if (currentIndex in _songQueue.indices) playbackHistory.push(currentIndex)
             Log.d("MusicController", "Queue loop under REPEAT_MODE_ALL, restarting from index 0")
+            playbackCompletionGuard.reset()
             playOnlineQueueIndex(0)
             return
         }
@@ -1549,7 +1550,7 @@ class MusicController @Inject constructor(
 
     fun getMediaController(): MediaController? = mediaController
 
-    fun getSongQueue(): List<SongEntity> = _songQueue
+    fun getSongQueue(): List<SongEntity> = synchronized(_songQueue) { _songQueue.toList() }
 
     fun setPlaybackSpeed(speed: Float) {
         runOnApplicationThread { it.setPlaybackSpeed(speed) }

@@ -296,7 +296,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(15 * 60 * 1000L)
-                refreshAiRecommendations()
+                runCatching { refreshAiRecommendations() }
             }
         }
     }
@@ -318,6 +318,8 @@ class HomeViewModel @Inject constructor(
                     // Prefetch top 2 Hotlist songs so tapping Play on Hotlist is 0ms instant!
                     innertubeApi.prefetchVisibleStreams(worldTrending.take(2).map { it.videoId })
                 }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error in HomeViewModel", e)
             } finally {
                 _isLoadingHotlist.value = false
             }
@@ -331,6 +333,8 @@ class HomeViewModel @Inject constructor(
             if (list.isNotEmpty()) {
                 _aiRecommendations.value = list
             }
+        } catch (e: Exception) {
+            Log.e("HomeViewModel", "Error in HomeViewModel", e)
         } finally {
             _isLoadingRecommendations.value = false
         }
@@ -346,6 +350,8 @@ class HomeViewModel @Inject constructor(
             try {
                 val results = aiModel.generateCategoryRecommendations(category, limit = 35)
                 _categoryRecommendations.value = _categoryRecommendations.value + (category to results)
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error in HomeViewModel", e)
             } finally {
                 _isLoadingRecommendations.value = false
             }

@@ -8569,37 +8569,10 @@ fun MyPlayerMultiStyleNowPlayingScreen(
 
 
             is LyricsUiState.Found -> {
-
-
-
-                val synced = st.result.syncedLyrics
-
-
-
-                if (!synced.isNullOrBlank()) {
-
-
-
-                    val currentLine = parseCurrentSyncedLine(synced, positionMs)
-
-
-
-                    currentLine.ifBlank { st.result.plainLyrics?.lines()?.firstOrNull { it.isNotBlank() } ?: "Tap to view lyrics" }
-
-
-
-                } else {
-
-
-
-                    st.result.plainLyrics?.lines()?.firstOrNull { it.isNotBlank() } ?: "Tap to view lyrics"
-
-
-
-                }
-
-
-
+                val currentPositionMs = positionMs
+                val currentLine = st.syncedLines.lastOrNull { it.timestampMs <= currentPositionMs }?.text
+                    ?: parseCurrentSyncedLine(st.result.syncedLyrics, currentPositionMs)
+                currentLine.ifBlank { st.result.plainLyrics?.lines()?.firstOrNull { it.isNotBlank() } ?: "Tap to view lyrics" }
             }
 
 
@@ -12532,18 +12505,13 @@ fun MyPlayerMultiStyleNowPlayingScreen(
 
 
 
-private fun parseCurrentSyncedLine(lrcText: String, positionMs: Long): String {
+private inline val Pair<Long, String>.timestampMs: Long get() = first
+private inline val Pair<Long, String>.text: String get() = second
 
-
-
+private fun parseCurrentSyncedLine(lrcText: String?, positionMs: Long): String {
+    if (lrcText.isNullOrBlank()) return ""
     val regex = Regex("""\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\](.*)""")
-
-
-
     var latestLine = ""
-
-
-
     for (rawLine in lrcText.lines()) {
 
 
@@ -20237,6 +20205,8 @@ fun MyPlayerAppearanceSettingsScreen(
                             value = myplayerState.blurStrengthPx,
                             onValueChange = {
                                 myplayerState.blurStrengthPx = it
+                            },
+                            onValueChangeFinished = {
                                 myplayerState.saveAppearanceToPrefs()
                             },
                             valueRange = 0f..50f,

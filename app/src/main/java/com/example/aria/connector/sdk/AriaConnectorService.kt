@@ -8,6 +8,7 @@ import android.util.Log
 import com.example.aria.connector.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
@@ -44,14 +45,15 @@ abstract class AriaConnectorService : Service() {
     // ── Public API ────────────────────────────────────────────────────────────
 
     /** Push a typed event to ARIA. */
-    protected fun notifyEvent(event: EcosystemEvent) {
+    protected fun notifyEvent(event: EcosystemEvent) = synchronized(callbacks) {
         val n = callbacks.beginBroadcast()
         try {
-            val container = EcosystemEventContainer(event)
             for (i in 0 until n) {
                 try {
-                    callbacks.getBroadcastItem(i).onEvent(container)
-                } catch (_: Exception) {}
+                    callbacks.getBroadcastItem(i).onEvent(EcosystemEventContainer(event))
+                } catch (e: Exception) {
+                    // Ignore dead client
+                }
             }
         } finally {
             callbacks.finishBroadcast()
@@ -117,16 +119,14 @@ abstract class AriaConnectorService : Service() {
     private val binderImpl = object : IAriaConnector.Stub() {
 
         override fun execute(container: AppCommandContainer): AppResponseContainer {
-            var result: AppResponse = AppResponse.Error(AppResponse.Error.ErrorCode.UNKNOWN, "")
-            val job = scope.launch {
-                result = try {
+            val result = try {
+                runBlocking(Dispatchers.IO) {
                     handleCommand(container.command)
-                } catch (e: Exception) {
-                    Log.e(tag, "handleCommand threw: ${e.message}")
-                    AppResponse.Error(AppResponse.Error.ErrorCode.COMMAND_FAILED, e.message ?: "Error")
                 }
+            } catch (e: Exception) {
+                Log.e(tag, "handleCommand threw: ${e.message}")
+                AppResponse.Error(AppResponse.Error.ErrorCode.COMMAND_FAILED, e.message ?: "Error")
             }
-            runBlocking { job.join() }
             return AppResponseContainer(result)
         }
 
@@ -155,18 +155,22 @@ abstract class AriaConnectorService : Service() {
                     AppResponse.Error.ErrorCode.UNKNOWN,
                     "Unrecognized command: $commandJson"
                 ).toJson()
-            var result: AppResponse = AppResponse.Error(AppResponse.Error.ErrorCode.UNKNOWN, "")
-            val job = scope.launch {
-                result = try {
+            val result = try {
+                runBlocking(Dispatchers.IO) {
                     handleCommand(command)
-                } catch (e: Exception) {
-                    Log.e(tag, "handleCommand threw: ${e.message}")
-                    AppResponse.Error(AppResponse.Error.ErrorCode.COMMAND_FAILED, e.message ?: "Error")
                 }
+            } catch (e: Exception) {
+                Log.e(tag, "handleCommand threw: ${e.message}")
+                AppResponse.Error(AppResponse.Error.ErrorCode.COMMAND_FAILED, e.message ?: "Error")
             }
-            runBlocking { job.join() }
             return result.toJson()
         }
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        callbacks.kill()
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent): IBinder {

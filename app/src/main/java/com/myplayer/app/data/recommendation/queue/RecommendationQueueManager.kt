@@ -9,7 +9,9 @@ import com.myplayer.app.data.recommendation.strategy.RecommendationStrategy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.system.measureTimeMillis
@@ -29,19 +31,25 @@ class RecommendationQueueManager @Inject constructor(
     private val logger: RecommendationLogger
 ) {
     private var session: RecommendationSession? = null
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
-    private var isRefilling = false
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val isRefilling = AtomicBoolean(false)
     
     // 15 minutes TTL
     private val QUEUE_TTL_MS = 15L * 60L * 1000L
 
     fun updateSession(seed: RecommendationSeed) {
+        val cleanSeedId = seed.songId.removePrefix("online://").trim()
         val isNewSeed = session != null && session?.seedSong?.songId != seed.songId
         // Check if this song was served as a recommendation or was queued in this session
         val isContinuationOfSession = seed.songId.isNotBlank() && (
             history.hasBeenServed(seed.songId) ||
             queue.contains(seed.songId) ||
-            recentPlaybackWindow.contains(seed.songId)
+            recentPlaybackWindow.contains(seed.songId) ||
+            (cleanSeedId.isNotBlank() && (
+                history.hasBeenServed(cleanSeedId) ||
+                queue.contains(cleanSeedId) ||
+                recentPlaybackWindow.contains(cleanSeedId)
+            ))
         )
 
         if (session == null) {
@@ -69,15 +77,20 @@ class RecommendationQueueManager @Inject constructor(
             } else {
                 // Continuation of recommendation autoplay — preserve existing recommendations in queue!
                 // Simply remove the newly started song so it isn't recommended again.
-                if (seed.songId.isNotBlank()) {
+                if (cleanSeedId.isNotBlank()) {
+                    queue.remove(cleanSeedId)
                     queue.remove(seed.songId)
                 }
                 logger.log("Continuing recommendation session with ${queue.size()} tracks remaining in queue")
             }
         }
 
+        if (cleanSeedId.isNotBlank()) {
+            queue.remove(cleanSeedId)
+            queue.remove(seed.songId)
+            recentPlaybackWindow.add(cleanSeedId)
+        }
         if (seed.songId.isNotBlank()) {
-            recentPlaybackWindow.add(seed.songId)
             history.recordState(seed.songId, RecommendationHistoryState.PLAYED)
         }
         checkAndRefillQueue(seed)
@@ -182,63 +195,62 @@ class RecommendationQueueManager @Inject constructor(
 
     private fun checkAndRefillQueue(seed: RecommendationSeed?) {
         if (seed == null) return
-        if (isRefilling) return
+        if (!policy.shouldRefill(queue.size())) return
+        if (!isRefilling.compareAndSet(false, true)) return
 
-        if (policy.shouldRefill(queue.size())) {
-            val sizeBefore = queue.size()
-            logger.logEvent("QueueRefillStarted", mapOf(
-                "sizeBefore" to sizeBefore,
-                "targetSize" to policy.targetSize
-            ))
-            isRefilling = true
-            scope.launch {
-                val fillTime = measureTimeMillis {
-                    try {
-                        session?.let { it.totalRecommendationRequests++ }
-                        
-                        // 1. Fetch raw/mapped from repository
-                        val recommendations = repository.getRecommendations(seed)
-                        
-                        // 2. Filter (History, Duplicate, Current, Queued)
-                        val filtered = filter.filter(recommendations, seed, queue.getQueuedIds())
-                        
-                        // 3. Validate
-                        val valid = validator.filterAndValidate(seed, filtered)
-                        
-                        // 4. Rank
-                        val ranked = strategy.scoreAndRank(seed, valid)
+        val sizeBefore = queue.size()
+        logger.logEvent("QueueRefillStarted", mapOf(
+            "sizeBefore" to sizeBefore,
+            "targetSize" to policy.targetSize
+        ))
+        scope.launch {
+            var rankedSize = 0
+            val fillTime = measureTimeMillis {
+                try {
+                    session?.let { it.totalRecommendationRequests++ }
+                    
+                    // 1. Fetch raw/mapped from repository
+                    val recommendations = repository.getRecommendations(seed)
+                    
+                    // 2. Filter (History, Duplicate, Current, Queued)
+                    val filtered = filter.filter(recommendations, seed, queue.getQueuedIds())
+                    
+                    // 3. Validate
+                    val valid = validator.filterAndValidate(seed, filtered)
+                    
+                    // 4. Rank
+                    val ranked = strategy.scoreAndRank(seed, valid)
+                    rankedSize = ranked.size
 
-                        if (ranked.isNotEmpty()) {
-                            queue.enqueue(ranked)
-                            health.recordRefill()
-                            session?.let { 
-                                it.queueRefills++
-                                it.recommendationsGenerated += recommendations.size
-                                it.recommendationsQueued += ranked.size
-                            }
+                    if (ranked.isNotEmpty()) {
+                        queue.enqueue(ranked)
+                        health.recordRefill()
+                        session?.let { 
+                            it.queueRefills++
+                            it.recommendationsGenerated += recommendations.size
+                            it.recommendationsQueued += ranked.size
                         }
-                        metrics.recordQueueRefresh(0, ranked.size)
-                        
-                        logger.logEvent("QueueRefillCompleted", mapOf(
-                            "generated" to recommendations.size,
-                            "valid" to valid.size,
-                            "ranked" to ranked.size,
-                            "newQueueSize" to queue.size()
-                        ))
-                    } catch (e: Exception) {
-                        logger.error("Error during queue refill", e)
-                        logger.logEvent("QueueRefillFailed", mapOf("reason" to (e.message ?: "Unknown")))
-                    } finally {
-                        isRefilling = false
                     }
+                    
+                    logger.logEvent("QueueRefillCompleted", mapOf(
+                        "generated" to recommendations.size,
+                        "valid" to valid.size,
+                        "ranked" to ranked.size,
+                        "newQueueSize" to queue.size()
+                    ))
+                } catch (e: Exception) {
+                    logger.error("Error during queue refill", e)
+                    logger.logEvent("QueueRefillFailed", mapOf("reason" to (e.message ?: "Unknown")))
+                } finally {
+                    isRefilling.set(false)
                 }
-                session?.let { it.totalRecommendationTimeMs += fillTime }
-                metrics.recordQueueRefresh(fillTime, 0)
-                logger.logEvent("QueueRefillMetrics", mapOf(
-                    "fillTimeMs" to fillTime,
-                    "sessionId" to (session?.sessionId ?: "none")
-                ))
             }
+            session?.let { it.totalRecommendationTimeMs += fillTime }
+            metrics.recordQueueRefresh(fillTime, rankedSize)
+            logger.logEvent("QueueRefillMetrics", mapOf(
+                "fillTimeMs" to fillTime,
+                "sessionId" to (session?.sessionId ?: "none")
+            ))
         }
     }
 }

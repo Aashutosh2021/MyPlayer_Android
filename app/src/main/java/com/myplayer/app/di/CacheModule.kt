@@ -2,6 +2,7 @@ package com.myplayer.app.di
 
 import android.content.Context
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import dagger.Module
@@ -25,7 +26,8 @@ object CacheModule {
         val cacheDir = File(context.cacheDir, "audio_streams")
         return SimpleCache(
             cacheDir,
-            LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES)
+            LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES),
+            StandaloneDatabaseProvider(context)
         )
     }
 }

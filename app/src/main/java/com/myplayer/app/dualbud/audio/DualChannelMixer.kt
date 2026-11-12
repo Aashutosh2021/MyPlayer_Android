@@ -207,12 +207,12 @@ class DualChannelMixer(
             rightBuffer.read(rightScratch, 0, CHUNK_FRAMES)
         } else 0
 
-        // If neither stream has data and neither is playing, yield
-        if (leftAvailable == 0 && rightAvailable == 0 && !isLeftPlaying && !isRightPlaying) {
+        // If neither stream has data, yield
+        if (leftAvailable == 0 && rightAvailable == 0) {
             return 0
         }
 
-        val framesToMix = maxOf(leftAvailable, rightAvailable, 1)
+        val framesToMix = maxOf(leftAvailable, rightAvailable)
 
         val lVol = leftVolume
         val rVol = rightVolume

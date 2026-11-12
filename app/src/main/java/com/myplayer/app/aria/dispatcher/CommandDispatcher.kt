@@ -279,9 +279,11 @@ class CommandDispatcher @Inject constructor(
 
             // ── Phase 2 Advanced API additions (Task 4: Streaming Commands & Cancellation) ──
             AriaCommand.CANCEL -> {
-                val transactionToCancel = data.getString(ARIA_KEY_TRANSACTION_ID)
+                val transactionToCancel = data.getString("target_transaction_id") ?: data.getString(ARIA_KEY_TRANSACTION_ID)
                 if (transactionToCancel != null) {
-                    activeTransactions.remove(transactionToCancel)?.cancel()
+                    if (transactionToCancel != transactionId) {
+                        activeTransactions.remove(transactionToCancel)?.cancel()
+                    }
                     sendResponse(replyTo, AriaGeneralResponse(AriaStatus.SUCCESS, ordinal, transactionId))
                 } else {
                     sendResponse(replyTo, AriaGeneralResponse(AriaStatus.BAD_REQUEST, ordinal, transactionId, "No transaction ID provided to cancel."))

@@ -57,6 +57,18 @@ fun SpotifyLoginDialog(
     var currentUrl by remember { mutableStateOf(SpotifyIntegrationManager.LOGIN_URL) }
     val tokenFetchStarted = remember { AtomicBoolean(false) }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            webViewRef?.apply {
+                stopLoading()
+                clearHistory()
+                (parent as? android.view.ViewGroup)?.removeView(this)
+                destroy()
+            }
+            webViewRef = null
+        }
+    }
+
     // Error state kept SEPARATE from statusText: previously any failure wrote into
     // statusText, which kept the full-screen loading overlay up forever with a
     // still-spinning loader and no dismiss button ("stuck on loading").

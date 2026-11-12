@@ -23,9 +23,6 @@ open class LastFmRecommendationSource : RecommendationSource {
 
     override suspend fun fetchRawRecommendations(seed: RecommendationSeed): List<OnlineSong> {
         val model = aiModel ?: return emptyList()
-        if (seed.songId.isNotBlank() && seed.title.isNotBlank()) {
-            model.onSongTransition(seed.songId, seed.title, seed.artist)
-        }
         return model.generateRecommendations(limit = 40).map { reco ->
             OnlineSong(
                 videoId = reco.videoId,

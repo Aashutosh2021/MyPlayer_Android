@@ -712,7 +712,7 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     if (recommendations.isNotEmpty()) {
-                        itemsIndexed(recommendations.take(10), key = { _, reco -> reco.videoId }) { index, reco ->
+                        itemsIndexed(recommendations.take(10), key = { index, reco -> "${reco.videoId}_$index" }) { index, reco ->
                             RecommendedSongCard(
                                 song = reco,
                                 isPlaying = currentSong?.videoId == reco.videoId || currentSong?.id == reco.videoId,

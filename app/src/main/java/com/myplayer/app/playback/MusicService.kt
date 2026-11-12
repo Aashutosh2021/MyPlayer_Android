@@ -390,6 +390,9 @@ class MusicService : MediaSessionService() {
             loudnessEnhancer?.release()
             loudnessEnhancer = null
         } catch (_: Exception) {}
+        try {
+            audioFeatureManagers.release()
+        } catch (_: Exception) {}
         serviceScope.cancel()
         mediaSession?.run {
             player.release()

@@ -102,6 +102,7 @@ class SpatialAudioProcessor(private val service: AudioFxService) : AudioProcesso
                 out.putShort(toPcm(renderer.left * SurroundGain))
                 out.putShort(toPcm(renderer.right * SurroundGain))
             }
+            if (inputBuffer.hasRemaining()) inputBuffer.position(inputBuffer.limit())
             out.flip()
             return
         }
@@ -114,7 +115,7 @@ class SpatialAudioProcessor(private val service: AudioFxService) : AudioProcesso
             out.flip()
             return
         }
-        val step = 1f / (sampleRate * ToggleSeconds)
+        val step = if (sampleRate > 0) 1f / (sampleRate * ToggleSeconds) else 0f
         when (params.mode) {
             SpatialMode.Crossfeed -> {
                 val cf = crossfeed?.takeIf { it.matches(params.cutoffHz, params.feedDb) }
@@ -157,6 +158,7 @@ class SpatialAudioProcessor(private val service: AudioFxService) : AudioProcesso
                 }
             }
         }
+        if (inputBuffer.hasRemaining()) inputBuffer.position(inputBuffer.limit())
         out.flip()
     }
 

@@ -17,9 +17,13 @@ class DefaultRankingStrategy @Inject constructor() : RecommendationStrategy {
     }
 
     override fun scoreAndRank(seed: RecommendationSeed, candidates: List<RecommendationSong>): List<RecommendationSong> {
-        val seedTokens = if (seed.album.isNotBlank()) {
-            seed.album.lowercase().split(TOKEN_REGEX).filter { it.isNotBlank() }.toSet()
-        } else emptySet()
+        val seedTokens = listOf(seed.title, seed.album)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .lowercase()
+            .split(TOKEN_REGEX)
+            .filter { it.isNotBlank() }
+            .toSet()
 
         val scored = candidates.map { candidate ->
             var score = 0

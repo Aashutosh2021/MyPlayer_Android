@@ -152,9 +152,17 @@ class ArtworkMatcher @Inject constructor() {
     fun createStableCacheKey(artist: String, title: String): String {
         val cArtist = cleanArtist(artist).lowercase()
         val cTitle = cleanTitle(title, cArtist).lowercase()
-        val rawKey = "${cArtist}_${cTitle}"
+        val rawKey = "${cArtist}_${cTitle}".trim('_')
+        if (rawKey.isBlank()) return "unknown_artwork"
         val sanitized = rawKey.replace(Regex("""[^a-z0-9]+"""), "_").trim('_')
-        return sanitized.ifBlank { "unknown_artwork" }
+        return if (sanitized.isNotBlank()) {
+            sanitized
+        } else {
+            val hash = java.security.MessageDigest.getInstance("MD5")
+                .digest(rawKey.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            "art_$hash"
+        }
     }
 
     private fun normalizedSimilarity(s1: String, s2: String): Double {

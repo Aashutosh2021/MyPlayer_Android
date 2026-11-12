@@ -66,12 +66,12 @@ class RedownloadQueueWorker @AssistedInject constructor(
 
         val current = todo.first()
         val remaining = todo.drop(1)
-        writeQueue(remaining)
 
         try {
             val streamUrl = innertubeApi.getStreamUrl(current.videoId)
             if (streamUrl.isNullOrBlank()) {
                 Log.w(TAG, "Could not resolve stream URL for '${current.title}' — skipping")
+                writeQueue(remaining)
             } else {
                 val started = downloadRepository.startDownload(
                     OnlineSong(
@@ -83,11 +83,17 @@ class RedownloadQueueWorker @AssistedInject constructor(
                         streamUrl = streamUrl
                     )
                 )
-                if (started) awaitDownloadFinished(current.videoId)
+                if (started) {
+                    writeQueue(remaining)
+                    awaitDownloadFinished(current.videoId)
+                } else {
+                    writeQueue(remaining)
+                }
                 Log.i(TAG, "Redownloaded '${current.title}' — ${remaining.size} left in queue")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Redownload failed for '${current.title}' — continuing with next", e)
+            writeQueue(remaining)
         }
 
         if (remaining.isNotEmpty()) scheduleSelf()

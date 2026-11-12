@@ -80,9 +80,13 @@ class TamperDetectionManager @Inject constructor(
 
         // Known legitimate installer package names
         private val LEGITIMATE_INSTALLERS = arrayOf(
-            "com.android.vending",          // Google Play Store
-            "com.google.android.packageinstaller", // Google Package Installer
-            "com.sec.android.app.samsungapps" // Samsung Galaxy Store (if applicable)
+            "com.android.vending",                  // Google Play Store
+            "com.google.android.packageinstaller",  // Google Package Installer
+            "com.android.packageinstaller",         // AOSP Package Installer
+            "com.miui.packageinstaller",            // Xiaomi Package Installer
+            "com.oplus.appdetail",                  // OPPO/OnePlus/Realme Package Installer
+            "com.sec.android.app.samsungapps",      // Samsung Galaxy Store
+            "org.fdroid.fdroid"                     // F-Droid
         )
     }
 
@@ -131,10 +135,10 @@ class TamperDetectionManager @Inject constructor(
                 context.packageManager.getInstallerPackageName(context.packageName)
             }
 
-            // Null installer = ADB install or side-loaded (suspicious in production)
+            // Null installer = direct APK / GitHub Release install (valid for open-source distribution)
             if (installer == null) {
-                Log.w(TAG, "Installer package is null — app may be side-loaded")
-                return true
+                Log.d(TAG, "Installer package is null — direct APK install")
+                return false
             }
 
             val isLegitimate = LEGITIMATE_INSTALLERS.any { legit ->

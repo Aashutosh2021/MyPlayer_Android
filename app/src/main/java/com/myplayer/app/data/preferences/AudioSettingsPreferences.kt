@@ -56,10 +56,10 @@ class AudioSettingsRepository @Inject constructor(
 
     val configFlow: Flow<AudioPlaybackConfig> = context.audioDataStore.data.map { prefs ->
         AudioPlaybackConfig(
-            wifiQuality = StreamQuality.valueOf(prefs[Keys.WIFI_QUALITY] ?: StreamQuality.HIGH.name),
-            mobileQuality = StreamQuality.valueOf(prefs[Keys.MOBILE_QUALITY] ?: StreamQuality.MEDIUM.name),
-            downloadQuality = StreamQuality.valueOf(prefs[Keys.DOWNLOAD_QUALITY] ?: StreamQuality.HIGH.name),
-            clarityPreset = ClarityPreset.valueOf(prefs[Keys.CLARITY_PRESET] ?: ClarityPreset.OFF.name),
+            wifiQuality = runCatching { StreamQuality.valueOf(prefs[Keys.WIFI_QUALITY] ?: "") }.getOrDefault(StreamQuality.HIGH),
+            mobileQuality = runCatching { StreamQuality.valueOf(prefs[Keys.MOBILE_QUALITY] ?: "") }.getOrDefault(StreamQuality.MEDIUM),
+            downloadQuality = runCatching { StreamQuality.valueOf(prefs[Keys.DOWNLOAD_QUALITY] ?: "") }.getOrDefault(StreamQuality.HIGH),
+            clarityPreset = runCatching { ClarityPreset.valueOf(prefs[Keys.CLARITY_PRESET] ?: "") }.getOrDefault(ClarityPreset.OFF),
             trueDolbySpatial = prefs[Keys.TRUE_DOLBY_SPATIAL] ?: false,
             spatialWidth = prefs[Keys.SPATIAL_WIDTH] ?: 0.45f,
             loudnessNormalize = prefs[Keys.LOUDNESS_NORMALIZE] ?: false,

@@ -87,25 +87,6 @@ fun MiniPlayer(
         }
     }
     val progress = (livePositionMs.toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f)
-    val context = androidx.compose.ui.platform.LocalContext.current
-
-    // Firebase Remote Notifications auto-polling & runtime permission request
-    LaunchedEffect(Unit) {
-        com.myplayer.app.ui.myplayer.MyPlayerRemoteNotificationManager.requestNotificationPermissionIfNeeded(context as? android.app.Activity)
-        com.myplayer.app.ui.myplayer.MyPlayerRemoteNotificationManager.startAutoPolling(context)
-    }
-
-    // Funny mood / vibe-check streak tracker + its popup
-    LaunchedEffect(song.title, song.artist, song.album, livePositionMs, isPlaying) {
-        com.myplayer.app.ui.myplayer.MyPlayerVibeCheckManager.onPlaybackTick(song.title, song.artist, song.album, isPlaying)
-    }
-    com.myplayer.app.ui.myplayer.MyPlayerVibeCheckManager.activePopup?.let { event ->
-        com.myplayer.app.ui.myplayer.MyPlayerVibeCheckPopupDialog(
-            event = event,
-            onDismiss = { com.myplayer.app.ui.myplayer.MyPlayerVibeCheckManager.dismissPopup() },
-            onSwitchVibeClick = onNextClick
-        )
-    }
 
     var swipeOffsetX by remember { mutableFloatStateOf(0f) }
     val animatedOffsetX by animateFloatAsState(

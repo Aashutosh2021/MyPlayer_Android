@@ -85,6 +85,7 @@ class PlaylistRepository @Inject constructor(
 
     suspend fun deletePlaylist(playlist: PlaylistEntity) = withContext(Dispatchers.IO) {
         try {
+            playlistDao.deleteAllSongsFromPlaylist(playlist.id)
             playlistDao.deletePlaylist(playlist)
         } catch (e: Exception) {
             android.util.Log.e("PlaylistRepository", "Failed to delete playlist ${playlist.id}", e)

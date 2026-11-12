@@ -126,6 +126,7 @@ class SpatialAudioProcessor @Inject constructor() : AudioProcessor {
                     out.putShort(toPcm(outR))
                 }
             }
+            if (inputBuffer.hasRemaining()) inputBuffer.position(inputBuffer.limit())
             out.flip()
             return
         }
@@ -142,7 +143,7 @@ class SpatialAudioProcessor @Inject constructor() : AudioProcessor {
             return
         }
 
-        val step = 1f / (sampleRate * ToggleSeconds)
+        val step = if (sampleRate > 0) 1f / (sampleRate * ToggleSeconds) else 0f
         val effectiveMode = if (p.surround && !p.enabled) SpatialMode.SPEAKERS else p.mode
 
         when (effectiveMode) {
@@ -201,6 +202,7 @@ class SpatialAudioProcessor @Inject constructor() : AudioProcessor {
                 }
             }
         }
+        if (inputBuffer.hasRemaining()) inputBuffer.position(inputBuffer.limit())
         out.flip()
     }
 

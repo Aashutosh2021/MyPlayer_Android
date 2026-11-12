@@ -18,6 +18,7 @@ class RecommendationFilter @Inject constructor(
     ): List<RecommendationSong> {
         val filtered = mutableListOf<RecommendationSong>()
         val seenIds = mutableSetOf<String>()
+        val cleanSeedId = seed?.songId?.removePrefix("online://")?.trim()
 
         for (song in candidates) {
             // Duplicate within candidates
@@ -33,7 +34,7 @@ class RecommendationFilter @Inject constructor(
             }
 
             // Current seed song
-            if (!seed?.songId.isNullOrBlank() && seed?.songId == song.videoId) {
+            if (!seed?.songId.isNullOrBlank() && (seed?.songId == song.videoId || (!cleanSeedId.isNullOrBlank() && cleanSeedId == song.videoId))) {
                 metrics.recordRejected()
                 continue
             }

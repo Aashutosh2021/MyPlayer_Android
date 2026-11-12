@@ -101,7 +101,7 @@ class ReverbAudioProcessor(private val service: AudioFxService) : AudioProcessor
         val targetDry = params.dry.coerceIn(0f, 1f)
         val targetMix = params.mix.coerceIn(0f, 1f)
 
-        val step = 1f / frames
+        val step = if (frames > 0) 1f / frames else 0f
         val toggleStep = 1f / (sampleRate * ToggleSeconds)
         val dWet1 = (targetWet1 - wet1) * step
         val dWet2 = (targetWet2 - wet2) * step
@@ -154,6 +154,7 @@ class ReverbAudioProcessor(private val service: AudioFxService) : AudioProcessor
         wet2 = targetWet2
         dryGain = targetDry
         mix = targetMix
+        if (inputBuffer.hasRemaining()) inputBuffer.position(inputBuffer.limit())
         out.flip()
     }
 

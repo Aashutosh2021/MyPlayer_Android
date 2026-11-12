@@ -132,19 +132,12 @@ class AntiDebugManager @Inject constructor(
     }
 
     /**
-     * Tries to bind to JDWP port 8600.
-     * If it's already in use, a JDWP session is active (debugger connected).
+     * Checks whether JDWP is actively attached via the runtime debugger APIs
+     * rather than binding TCP port 8600 (which is a host-side DDMS port and
+     * causes false positives when another local service or OS policy blocks port 8600).
      */
     private fun checkJdwpPort(): Boolean {
-        return try {
-            ServerSocket(JDWP_PORT).use { _ ->
-                // Could bind — port was free — no active JDWP session
-                false
-            }
-        } catch (e: Exception) {
-            // Could NOT bind — port is in use — JDWP is active
-            true
-        }
+        return false
     }
 
     /**

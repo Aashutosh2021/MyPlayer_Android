@@ -60,9 +60,13 @@ fun SyncPlayScreen(
     }
 
     // Automatically switch tab if a session is active in one of the modes
+    var lastSyncRole by remember { mutableStateOf(state.role) }
+    var lastLtRole by remember { mutableStateOf(ltState.role) }
     LaunchedEffect(state.role, ltState.role) {
-        if (ltState.role != LtRole.NONE) selectedTab = 0
-        else if (state.role != SyncRole.NONE) selectedTab = 1
+        if (ltState.role != LtRole.NONE && lastLtRole == LtRole.NONE) selectedTab = 0
+        else if (state.role != SyncRole.NONE && lastSyncRole == SyncRole.NONE) selectedTab = 1
+        lastSyncRole = state.role
+        lastLtRole = ltState.role
     }
 
     Scaffold(
@@ -894,7 +898,8 @@ private fun LocalWifiSyncSection(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.joinByIp(inputIp, inputPort.toIntOrNull() ?: 45200)
+                        val parsedPort = (inputPort.toIntOrNull() ?: 45200).coerceIn(1, 65535)
+                        viewModel.joinByIp(inputIp, parsedPort)
                         showJoinByIpDialog = false
                     },
                     enabled = inputIp.isNotBlank()

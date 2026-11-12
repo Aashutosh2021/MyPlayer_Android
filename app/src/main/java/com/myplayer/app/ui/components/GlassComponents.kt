@@ -159,7 +159,7 @@ fun ClayProgressBar(
     modifier: Modifier = Modifier,
     height: Dp = 12.dp
 ) {
-    val clampedProgress = progress.coerceIn(0f, 1f)
+    val clampedProgress = if (progress.isNaN() || progress.isInfinite()) 0f else progress.coerceIn(0f, 1f)
     Box(
         modifier = modifier
             .height(height)

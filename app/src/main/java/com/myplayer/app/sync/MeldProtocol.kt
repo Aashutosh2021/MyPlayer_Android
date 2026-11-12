@@ -129,14 +129,14 @@ class ProtoReader(private val bytes: ByteArray) {
     }
 
     fun readString(length: Int): String {
-        val len = length.coerceAtMost(bytes.size - pos)
+        val len = length.coerceIn(0, (bytes.size - pos).coerceAtLeast(0))
         val s = String(bytes, pos, len, Charsets.UTF_8)
         pos += len
         return s
     }
 
     fun readBytes(length: Int): ByteArray {
-        val len = length.coerceAtMost(bytes.size - pos)
+        val len = length.coerceIn(0, (bytes.size - pos).coerceAtLeast(0))
         val b = bytes.copyOfRange(pos, pos + len)
         pos += len
         return b
@@ -147,8 +147,8 @@ class ProtoReader(private val bytes: ByteArray) {
             0 -> readVarint()
             1 -> pos = (pos + 8).coerceAtMost(bytes.size)
             2 -> {
-                val len = readVarint().toInt()
-                pos = (pos + len).coerceAtMost(bytes.size)
+                val len = readVarint().toInt().coerceAtLeast(0)
+                pos = (pos + len).coerceIn(0, bytes.size)
             }
             5 -> pos = (pos + 4).coerceAtMost(bytes.size)
             else -> pos = bytes.size

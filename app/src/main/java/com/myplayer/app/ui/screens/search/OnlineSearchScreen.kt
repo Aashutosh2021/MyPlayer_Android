@@ -687,7 +687,7 @@ fun OnlineResultsList(
             }
         }
 
-        items(results.itemCount, key = results.itemKey { it.videoId }) { index ->
+        items(results.itemCount, key = { index -> "${results[index]?.videoId ?: "item"}_$index" }) { index ->
             val song = results[index] ?: return@items
             val isDownloaded = song.videoId in downloadedIds
             val isStreaming = isLoadingStream == song.videoId

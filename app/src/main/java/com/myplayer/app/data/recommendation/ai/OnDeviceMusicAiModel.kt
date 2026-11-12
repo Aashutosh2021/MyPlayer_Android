@@ -697,6 +697,7 @@ class OnDeviceMusicAiModel @Inject constructor(
         return l2Normalize(vec)
     }
 
+    @Synchronized
     fun predictAffinityScore(candidate: OnlineSong): Float {
         val candVec = embedSong(candidate.title, candidate.artist, candidate.durationMs)
         val slot = currentTimeSlot()
@@ -795,7 +796,7 @@ class OnDeviceMusicAiModel @Inject constructor(
             .sortedByDescending { it.timestamp }
             .take(MAX_HISTORY_ENTRIES)
             .joinToString("\n") {
-                "${it.videoId}\t${it.title.replace("\t", " ")}\t${it.artist.replace("\t", " ")}\t${it.durationMs}\t${"%.2f".format(Locale.US, it.score)}\t${it.timestamp}"
+                "${it.videoId}\t${it.title.replace(Regex("[\t\r\n]"), " ")}\t${it.artist.replace(Regex("[\t\r\n]"), " ")}\t${it.durationMs}\t${"%.2f".format(Locale.US, it.score)}\t${it.timestamp}"
             }
         prefs.edit().putString("pattern_entries", capped).apply()
     }

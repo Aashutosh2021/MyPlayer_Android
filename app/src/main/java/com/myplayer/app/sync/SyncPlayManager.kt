@@ -47,7 +47,7 @@ class SyncPlayManager @Inject constructor(
 
     private val deviceId: String = UUID.randomUUID().toString()
     private var sessionId: String = ""
-    private var sequenceCounter = 0L
+    private val sequenceCounter = java.util.concurrent.atomic.AtomicLong(0L)
 
     private var transport: SyncTransport? = null
     private var transportJob: Job? = null
@@ -66,7 +66,7 @@ class SyncPlayManager @Inject constructor(
     private val _uiState = MutableStateFlow(SyncUiState(isEmulator = isEmulator()))
     val uiState: StateFlow<SyncUiState> = _uiState.asStateFlow()
 
-    private fun nextSeq() = sequenceCounter++
+    private fun nextSeq() = sequenceCounter.getAndIncrement()
 
     private fun updateState(transform: (SyncUiState) -> SyncUiState) {
         _uiState.value = transform(_uiState.value)
@@ -603,7 +603,23 @@ class SyncPlayManager @Inject constructor(
                         updateState { it.copy(devices = connectedDevices.values.toList()) }
                     }
                     Log.i(TAG, "SYNC READY:\ndevice=${message.senderId}")
-                    checkMasterBarrierAndStart()
+                    if (isPlaybackScheduled && (_uiState.value.playbackState == SyncPlaybackState.PLAYING || musicController.isPlaying.value)) {
+                        val leadMs = PLAY_AT_LEAD_MS
+                        val targetPos = musicController.getCurrentPosition() + leadMs
+                        Log.i(TAG, "Late-joining slave ${message.senderId} is READY while Master is playing; sending PLAY_AT at ${targetPos}ms")
+                        sendMessage(
+                            SyncMessage.PlayAt(
+                                sessionId = sessionId,
+                                senderId = deviceId,
+                                sequence = nextSeq(),
+                                timestamp = System.currentTimeMillis(),
+                                startDelayMs = leadMs,
+                                positionMs = targetPos
+                            )
+                        )
+                    } else {
+                        checkMasterBarrierAndStart()
+                    }
                 } else {
                     if (dev != null) {
                         connectedDevices[message.senderId] = dev.copy(
@@ -1052,7 +1068,7 @@ class SyncPlayManager @Inject constructor(
         pendingStartPositionMs = 0L
         isMasterPrepared = false
         isPlaybackScheduled = false
-        sequenceCounter = 0L
+        sequenceCounter.set(0L)
         sessionId = ""
         val isEmu = isEmulator()
         updateState { SyncUiState(isEmulator = isEmu) }

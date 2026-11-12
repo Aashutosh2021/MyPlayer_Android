@@ -20,6 +20,9 @@ interface PlaylistDao {
     @Delete
     fun deletePlaylist(playlist: PlaylistEntity): Unit
 
+    @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId")
+    suspend fun deleteAllSongsFromPlaylist(playlistId: Long)
+
     @Query("UPDATE playlists SET name = :newName WHERE id = :playlistId")
     fun renamePlaylist(playlistId: Long, newName: String): Unit
 

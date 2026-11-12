@@ -120,6 +120,7 @@ class LoudnessAudioProcessor(private val service: AudioFxService) : AudioProcess
         val meterReduction = (mostReduction + 20f * log10(max(deepest, 1e-6f))) * amount
         service.loudnessReductionDb = meterReduction
         MyPlayerAudioTap.loudnessReductionDb = meterReduction
+        if (inputBuffer.hasRemaining()) inputBuffer.position(inputBuffer.limit())
         out.flip()
     }
 

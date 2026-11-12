@@ -99,7 +99,7 @@ class StringEncryptionManager @Inject constructor() {
     }
 
     // In-memory cache — values are wiped if the app process is killed
-    private val cache = HashMap<String, String>(8)
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, String>(8)
 
     // ─── Public API ──────────────────────────────────────────────────────────
 

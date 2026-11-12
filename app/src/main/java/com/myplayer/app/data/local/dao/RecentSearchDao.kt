@@ -16,7 +16,7 @@ interface RecentSearchDao {
     @Query("DELETE FROM recent_searches WHERE query = :query")
     suspend fun delete(query: String)
 
-    @Query("DELETE FROM recent_searches WHERE query NOT IN (SELECT query FROM recent_searches ORDER BY timestamp DESC LIMIT 20)")
+    @Query("DELETE FROM recent_searches WHERE query NOT IN (SELECT query FROM (SELECT query FROM recent_searches ORDER BY timestamp DESC LIMIT 20))")
     suspend fun trimOldEntries()
 
     @Query("DELETE FROM recent_searches")

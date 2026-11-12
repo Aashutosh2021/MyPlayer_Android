@@ -34,13 +34,6 @@ class RecommendationEngine @Inject constructor(
 
                 // Return raw unranked/unfiltered mapped candidates
                 result = RecommendationResult.Success(mappedCandidates)
-                
-                if (mappedCandidates.isNotEmpty()) {
-                    metrics.recordFetchSuccess(0) // Time recorded outside
-                } else {
-                    metrics.recordFetchFailure()
-                }
-                
             } catch (e: Exception) {
                 logger.error("Exception during recommendation generation", e)
                 metrics.recordFetchFailure()
@@ -49,8 +42,14 @@ class RecommendationEngine @Inject constructor(
         }
         
         if (result is RecommendationResult.Success) {
-            metrics.recordFetchSuccess(timeTaken) // Accurately record time
-            logger.log("Completed generation in ${timeTaken}ms. Fetched: ${(result as RecommendationResult.Success).songs.size}")
+            val successResult = result as RecommendationResult.Success
+            if (successResult.songs.isNotEmpty()) {
+                metrics.recordFetchSuccess(timeTaken) // Accurately record time
+                logger.log("Completed generation in ${timeTaken}ms. Fetched: ${successResult.songs.size}")
+            } else {
+                metrics.recordFetchFailure()
+                logger.log("Completed generation in ${timeTaken}ms. Fetched: 0 (empty)")
+            }
         }
         
         return result

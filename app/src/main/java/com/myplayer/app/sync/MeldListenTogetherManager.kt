@@ -77,8 +77,8 @@ class MeldListenTogetherManager @Inject constructor(
         managerScope.launch {
             musicController.currentSong.collect { song ->
                 if (_uiState.value.role == LtRole.HOST) {
-                    if (song != null && musicController.isPlaying.value && song.id != lastBroadcastSongId) {
-                        Log.d(TAG, "Host started new song — broadcasting to room: ${song.title}")
+                    if (song != null && song.id != lastBroadcastSongId) {
+                        Log.d(TAG, "Host changed song — broadcasting to room: ${song.title}")
                         broadcastTrack(song)
                     } else if (song != null) {
                         _uiState.update { it.copy(currentTrack = toLtTrack(song)) }
@@ -288,6 +288,7 @@ class MeldListenTogetherManager @Inject constructor(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WebSocket failure: ${t.message}", t)
+                disconnect()
                 managerScope.launch {
                     _uiState.update {
                         it.copy(
@@ -528,7 +529,11 @@ class MeldListenTogetherManager @Inject constructor(
             }
 
             MeldPlaybackActions.PLAY -> {
-                val elapsed = maxOf(0L, (serverClock.now() ?: System.currentTimeMillis()) - action.serverTime)
+                val elapsed = if (action.serverTime > 0L) {
+                    maxOf(0L, (serverClock.now() ?: System.currentTimeMillis()) - action.serverTime)
+                } else {
+                    0L
+                }
                 val target = action.position + elapsed
                 val currentPos = musicController.getCurrentPosition()
                 if (kotlin.math.abs(currentPos - target) > 1000L) {

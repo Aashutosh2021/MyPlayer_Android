@@ -55,7 +55,7 @@ class EmulatorDetectionManager @Inject constructor(
 
         // Known emulator manufacturers and hardware identifiers
         private val EMULATOR_MANUFACTURERS = arrayOf(
-            "Genymotion", "unknown", "Google", "Andy", "MIT", "nox", "TiantianVM"
+            "Genymotion", "unknown", "Andy", "MIT", "nox", "TiantianVM"
         )
         private val EMULATOR_MODELS = arrayOf(
             "sdk", "Emulator", "Android SDK built for x86",
@@ -168,7 +168,6 @@ class EmulatorDetectionManager @Inject constructor(
             val networkOperator = tm.networkOperatorName
             // Emulators often report "Android" as the network operator
             networkOperator.equals("Android", ignoreCase = true)
-                || networkOperator.isBlank()
         } catch (e: Exception) { false }
     }
 

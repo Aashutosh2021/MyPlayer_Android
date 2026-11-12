@@ -446,7 +446,7 @@ object PlayerModule {
                     .setEnableFloatOutput(false)
                     .setEnableAudioTrackPlaybackParams(false)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
-                    .setAudioProcessors(arrayOf(masterAudioDspProcessor, *myplayerFx))
+                    .setAudioProcessors(arrayOf(masterAudioDspProcessor, lastWaveDspProcessor, spatialAudioProcessor, *myplayerFx))
                     .build()
                 return com.myplayer.app.myplayerfx.audio.MyPlayerVolumeSink(sink, audioFx, replayGain)
             }

@@ -9,6 +9,7 @@ import com.example.aria.connector.AppCommand
 import com.example.aria.connector.AppResponse
 import com.example.aria.connector.Capability
 import com.example.aria.connector.sdk.MusicConnectorService
+import com.myplayer.app.aria.cache.AriaMemoryCache
 import com.myplayer.app.aria.model.*
 import com.myplayer.app.aria.providers.*
 import com.myplayer.app.aria.recovery.AriaStateRecoveryManager
@@ -36,6 +37,9 @@ class AriaService : MusicConnectorService() {
 
     @Inject
     lateinit var stateRecoveryManager: AriaStateRecoveryManager
+
+    @Inject
+    lateinit var memoryCache: AriaMemoryCache
 
     @Inject
     lateinit var musicController: MusicController
@@ -101,7 +105,9 @@ class AriaService : MusicConnectorService() {
 
         // Restore playback state asynchronously (Task 9: State Recovery)
         serviceScope.launch {
-            stateRecoveryManager.restoreState(musicController)
+            if (musicController.currentSong.value == null && musicController.getSongQueue().isEmpty()) {
+                stateRecoveryManager.restoreState(musicController)
+            }
             startStateObservers()
         }
     }
@@ -292,7 +298,12 @@ class AriaService : MusicConnectorService() {
     }
 
     override suspend fun onDownload(trackId: String): AppResponse = withContext(Dispatchers.Main) {
-        downloadProvider.downloadSong(trackId, "", "", AriaCommand.DOWNLOAD_SONG.ordinal, null).toAppResponse()
+        val downloaded = memoryCache.getDownloadedSong(trackId)
+        val local = memoryCache.getLocalSong(trackId)
+        val current = musicController.currentSong.value?.takeIf { it.id == trackId || it.videoId == trackId }
+        val title = downloaded?.title ?: local?.title ?: current?.title ?: "Track $trackId"
+        val artist = downloaded?.artist ?: local?.artist ?: current?.artist ?: "Unknown Artist"
+        downloadProvider.downloadSong(trackId, title, artist, AriaCommand.DOWNLOAD_SONG.ordinal, null).toAppResponse()
     }
 
     override suspend fun onGetLyrics(): AppResponse = withContext(Dispatchers.Main) {

@@ -184,6 +184,75 @@ class BackupRestoreManager @Inject constructor(
             }
         }
 
+        // 4. Ensure online favorites and recent history songs are also preserved in songsMap
+        val favoritesRaw = db.favoriteDao().getAllFavoritesSync()
+        favoritesRaw.forEach { fav ->
+            if (!songsMap.containsKey(fav.songId)) {
+                val matchingDl = allDownloads.firstOrNull { it.id == fav.songId }
+                if (matchingDl != null) {
+                    songsMap[fav.songId] = SongEntity(
+                        id = matchingDl.id,
+                        title = matchingDl.title,
+                        artist = matchingDl.artist,
+                        album = matchingDl.album.ifBlank { "Downloads" },
+                        duration = matchingDl.durationMs,
+                        path = matchingDl.localPath,
+                        albumArt = matchingDl.thumbnailUrl,
+                        dateAdded = matchingDl.downloadedAt,
+                        playCount = 0,
+                        videoId = matchingDl.id
+                    )
+                } else {
+                    songsMap[fav.songId] = SongEntity(
+                        id = fav.songId,
+                        title = "Unknown Track",
+                        artist = "Unknown Artist",
+                        album = "Favorites",
+                        duration = 0L,
+                        path = "online://${fav.songId}",
+                        albumArt = null,
+                        dateAdded = System.currentTimeMillis(),
+                        playCount = 0,
+                        videoId = fav.songId
+                    )
+                }
+            }
+        }
+
+        val recentHistoryRaw = db.recentHistoryDao().getAllRecentHistorySync()
+        recentHistoryRaw.forEach { hist ->
+            if (!songsMap.containsKey(hist.songId)) {
+                val matchingDl = allDownloads.firstOrNull { it.id == hist.songId }
+                if (matchingDl != null) {
+                    songsMap[hist.songId] = SongEntity(
+                        id = matchingDl.id,
+                        title = matchingDl.title,
+                        artist = matchingDl.artist,
+                        album = matchingDl.album.ifBlank { "Downloads" },
+                        duration = matchingDl.durationMs,
+                        path = matchingDl.localPath,
+                        albumArt = matchingDl.thumbnailUrl,
+                        dateAdded = matchingDl.downloadedAt,
+                        playCount = 0,
+                        videoId = matchingDl.id
+                    )
+                } else {
+                    songsMap[hist.songId] = SongEntity(
+                        id = hist.songId,
+                        title = "Unknown Track",
+                        artist = "Unknown Artist",
+                        album = "History",
+                        duration = 0L,
+                        path = "online://${hist.songId}",
+                        albumArt = null,
+                        dateAdded = System.currentTimeMillis(),
+                        playCount = 0,
+                        videoId = hist.songId
+                    )
+                }
+            }
+        }
+
         val songs = songsMap.values.map {
             BackupSong(
                 id = it.id,
@@ -213,7 +282,7 @@ class BackupRestoreManager @Inject constructor(
             )
         }
 
-        val favorites = db.favoriteDao().getAllFavoritesSync().map { BackupFavorite(it.songId, it.addedAt) }
+        val favorites = favoritesRaw.map { BackupFavorite(it.songId, it.addedAt) }
 
         val playlistsList = db.playlistDao().getAllPlaylists().firstOrNull() ?: emptyList()
         val playlists = playlistsList.map { BackupPlaylist(it.id, it.name, it.createdAt) }
@@ -222,7 +291,7 @@ class BackupRestoreManager @Inject constructor(
             BackupPlaylistSong(it.playlistId, it.songId, it.position)
         }
 
-        val recentHistory = db.recentHistoryDao().getAllRecentHistorySync().map { BackupRecentHistory(it.songId, it.playedAt) }
+        val recentHistory = recentHistoryRaw.map { BackupRecentHistory(it.songId, it.playedAt) }
         val recentSearches = db.recentSearchDao().getAllRecentSearchesSync().map { BackupRecentSearch(it.query, it.timestamp) }
         val cachedLyrics = db.cachedLyricsDao().getAllCachedLyricsSync().map {
             BackupCachedLyrics(it.songId, it.plainLyrics, it.syncedLyrics, it.trackName, it.artistName, it.cachedAt)
