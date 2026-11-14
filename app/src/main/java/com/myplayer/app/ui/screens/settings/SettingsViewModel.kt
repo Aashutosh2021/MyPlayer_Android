@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -47,6 +48,7 @@ sealed interface ManualUpdateState {
 class SettingsViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val settingsDataStore: SettingsDataStore,
+    private val musicRepository: com.myplayer.app.data.repository.MusicRepository,
     private val preferencesManager: PreferencesManager,
     private val backupRestoreManager: BackupRestoreManager,
     private val updateChecker: UpdateChecker,
@@ -136,6 +138,51 @@ class SettingsViewModel @Inject constructor(
 
     val downloadFolderUri = preferencesManager.downloadFolderUri
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val localFolders = musicRepository.getAllFolders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val localSongsCount = musicRepository.getAllSongs().map { songs ->
+        songs.count { !it.path.startsWith("online://") && !it.id.startsWith("spotify:") }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    private val _isScanningLocal = MutableStateFlow(false)
+    val isScanningLocal = _isScanningLocal.asStateFlow()
+
+    fun addLocalMusicFolder(uri: String, name: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanningLocal.value = true
+            try {
+                musicRepository.addFolder(uri, name)
+                _spotifySyncMessage.value = "Added local music folder '$name' & scanned audio files!"
+            } catch (e: Exception) {
+                _spotifySyncMessage.value = "Failed to scan folder: ${e.message}"
+            } finally {
+                _isScanningLocal.value = false
+            }
+        }
+    }
+
+    fun removeLocalMusicFolder(folder: com.myplayer.app.data.local.entity.FolderEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            musicRepository.removeFolder(folder)
+            _spotifySyncMessage.value = "Removed folder '${folder.name}'."
+        }
+    }
+
+    fun rescanLocalMusic() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isScanningLocal.value = true
+            try {
+                musicRepository.rescanAllFolders()
+                _spotifySyncMessage.value = "Scanned local storage for audio files! Open Library > Local Files to play."
+            } catch (e: Exception) {
+                _spotifySyncMessage.value = "Local scan failed: ${e.message}"
+            } finally {
+                _isScanningLocal.value = false
+            }
+        }
+    }
 
     val userName = settingsDataStore.userName
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")

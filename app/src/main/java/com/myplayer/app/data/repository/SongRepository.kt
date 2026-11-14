@@ -13,8 +13,6 @@ import javax.inject.Singleton
 /**
  * Repository owning scanned songs, directory folders, scanning, and metadata play counts.
  * Standardizes Dispatchers.IO for SQLite transactions and structured error handling.
- *
- * Introduced in Phase R8 — Data Layer Consolidation.
  */
 @Singleton
 class SongRepository @Inject constructor(
@@ -37,19 +35,26 @@ class SongRepository @Inject constructor(
         }
     }
 
-    // Folder Management (Disabled: pure local device storage scanning removed)
+    // Folder Management & Local Audio Scanning
     fun getAllFolders(): Flow<List<FolderEntity>> = folderDao.getAllFolders()
 
     suspend fun addFolder(uri: String, name: String) = withContext(Dispatchers.IO) {
-        // Disabled: no local folders
+        val folder = FolderEntity(uri = uri.trim(), name = name.trim().ifBlank { "Local Music" })
+        folderDao.clearAllFolders()
+        folderDao.addFolder(folder)
+        mediaScanner.scanAllFolders()
     }
 
     suspend fun removeFolder(folder: FolderEntity) = withContext(Dispatchers.IO) {
-        // Disabled: no local folders
+        folderDao.deleteFolder(folder)
+        songDao.clearAllLocalSongs()
+        if (folderDao.getFoldersSync().isNotEmpty()) {
+            mediaScanner.scanAllFolders()
+        }
     }
 
     suspend fun rescanAllFolders() = withContext(Dispatchers.IO) {
-        // Disabled: no local folders
+        mediaScanner.scanAllFolders()
     }
 
     suspend fun getSongById(id: String): SongEntity? = withContext(Dispatchers.IO) {

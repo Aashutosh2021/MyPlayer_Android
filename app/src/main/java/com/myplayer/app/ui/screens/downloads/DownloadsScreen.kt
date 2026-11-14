@@ -42,6 +42,14 @@ fun DownloadsScreen(
     val downloads by viewModel.filteredDownloads.collectAsStateWithLifecycle()
     val query by viewModel.searchQuery.collectAsStateWithLifecycle()
     var songToDelete by remember { mutableStateOf<DownloadedSongEntity?>(null) }
+    val exportMessage by viewModel.exportMessage.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(exportMessage) {
+        exportMessage?.let {
+            android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
+            viewModel.clearExportMessage()
+        }
+    }
 
     // Delete confirmation dialog
     songToDelete?.let { song ->
@@ -205,7 +213,8 @@ fun DownloadsScreen(
                             viewModel.playSong(downloads, index)
                             onNavigateToNowPlaying()
                         },
-                        onDeleteClick = { songToDelete = song }
+                        onDeleteClick = { songToDelete = song },
+                        onExportFileClick = { fmt -> viewModel.exportSongAsFile(song, fmt) }
                     )
                 }
                 item { Spacer(Modifier.height(bottomPadding + 20.dp)) }
@@ -218,7 +227,8 @@ fun DownloadsScreen(
 fun DownloadedSongItem(
     song: DownloadedSongEntity,
     onPlayClick: () -> Unit,
-    onDeleteClick: () -> Unit
+    onDeleteClick: () -> Unit,
+    onExportFileClick: (String) -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -342,6 +352,16 @@ fun DownloadedSongItem(
                     text = { Text("Play", color = MaterialTheme.colorScheme.onSurface) },
                     leadingIcon = { Icon(Icons.Filled.PlayArrow, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     onClick = { showMenu = false; onPlayClick() }
+                )
+                DropdownMenuItem(
+                    text = { Text("Download MP3 File (Save to Phone)", color = MaterialTheme.colorScheme.onSurface) },
+                    leadingIcon = { Icon(Icons.Filled.AudioFile, null, tint = ClayPrimary) },
+                    onClick = { showMenu = false; onExportFileClick("mp3") }
+                )
+                DropdownMenuItem(
+                    text = { Text("Download M4A File (Save to Phone)", color = MaterialTheme.colorScheme.onSurface) },
+                    leadingIcon = { Icon(Icons.Filled.SaveAlt, null, tint = ClayPrimary) },
+                    onClick = { showMenu = false; onExportFileClick("m4a") }
                 )
                 DropdownMenuItem(
                     text = { Text("Delete", color = MaterialTheme.colorScheme.error) },

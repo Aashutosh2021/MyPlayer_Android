@@ -52,8 +52,34 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val playlistStats by viewModel.playlistStats.collectAsStateWithLifecycle()
+    val playlistBatchStatus by viewModel.playlistBatchStatus.collectAsStateWithLifecycle()
     val downloadedSongs by viewModel.downloadedSongs.collectAsStateWithLifecycle()
+    val localSongs by viewModel.localSongs.collectAsStateWithLifecycle()
+    val isScanningLocal by viewModel.isScanningLocal.collectAsStateWithLifecycle()
     val favoriteSongs by viewModel.favoriteSongs.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val localFolderLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            val folderName = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri)?.name ?: "Local Music"
+            viewModel.addLocalFolder(uri.toString(), folderName)
+        }
+    }
+
+    val audioPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        viewModel.rescanLocalSongs()
+    }
 
     // Persisted across navigation (NavHost's rememberSaveableStateHolder):
     // previously a plain remember reset the section to Downloaded every time the
@@ -350,7 +376,7 @@ fun LibraryScreen(
             }
 
         // ── Stitch Screen 8: Category Filter Chips ────────────────────────────
-        val categoryTabs = remember { listOf("Downloaded", "Playlists") }
+        val categoryTabs = remember { listOf("Downloaded", "Local Files", "Playlists") }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -394,7 +420,7 @@ fun LibraryScreen(
             }
         }
 
-        if (selectedTab in 0..1) {
+        if (selectedTab in 0..2) {
             // ── Stitch Screen 8: Sort & Action Row ────────────────────────────────
             Row(
                 modifier = Modifier
@@ -413,7 +439,7 @@ fun LibraryScreen(
                     Icon(Icons.Filled.SwapVert, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = if (selectedTab == 0) {
+                        text = if (selectedTab == 0 || selectedTab == 1) {
                             if (sortAscending) "Alphabetical (A–Z)" else "Alphabetical (Z–A)"
                         } else {
                             if (sortAscending) "Recently Added" else "Oldest First"
@@ -425,6 +451,35 @@ fun LibraryScreen(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (selectedTab == 1) {
+                        OutlinedButton(
+                            onClick = { localFolderLauncher.launch(null) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Select Folder", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val perm = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                    android.Manifest.permission.READ_MEDIA_AUDIO
+                                } else {
+                                    android.Manifest.permission.READ_EXTERNAL_STORAGE
+                                }
+                                audioPermLauncher.launch(perm)
+                            },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (isScanningLocal) "Scanning..." else "Scan Phone", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                     Box(
                         modifier = Modifier
                             .size(36.dp)
@@ -449,6 +504,28 @@ fun LibraryScreen(
                 onPlaySong = onPlaySong,
                 onAddToPlaylist = { songToAddToPlaylist = it },
                 onRemoveDownload = { songToRemoveDownload = it },
+                onExportFile = { song, fmt -> viewModel.exportSongAsFile(song, fmt) },
+                bottomPadding = bottomPadding
+            )
+            1 -> HybridSongsTab(
+                songs = remember(localSongs, sortAscending) {
+                    if (sortAscending) localSongs.sortedBy { it.title.lowercase() }
+                    else localSongs.sortedByDescending { it.title.lowercase() }
+                },
+                onPlaySong = onPlaySong,
+                onAddToPlaylist = { songToAddToPlaylist = it },
+                onRemoveDownload = { songToRemoveDownload = it },
+                onExportFile = { song, fmt -> viewModel.exportSongAsFile(song, fmt) },
+                isLocalTab = true,
+                onSelectLocalFolder = { localFolderLauncher.launch(null) },
+                onScanDeviceAudio = {
+                    val perm = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        android.Manifest.permission.READ_MEDIA_AUDIO
+                    } else {
+                        android.Manifest.permission.READ_EXTERNAL_STORAGE
+                    }
+                    audioPermLauncher.launch(perm)
+                },
                 bottomPadding = bottomPadding
             )
             else -> PlaylistsTab(
@@ -457,6 +534,9 @@ fun LibraryScreen(
                     else playlists.sortedBy { it.createdAt }
                 },
                 favoriteSongs = favoriteSongs,
+                playlistStats = playlistStats,
+                playlistBatchStatus = playlistBatchStatus,
+                onTogglePlaylistDownload = viewModel::togglePlaylistDownload,
                 onPlayFavoriteSongs = { onPlaySong(favoriteSongs, 0) },
                 onCreatePlaylist = { showCreatePlaylistDialog = true },
                 onDeletePlaylist = viewModel::deletePlaylist,
@@ -477,16 +557,55 @@ fun HybridSongsTab(
     onPlaySong: (List<PlayableSong>, Int) -> Unit,
     onAddToPlaylist: (PlayableSong) -> Unit,
     onRemoveDownload: (PlayableSong) -> Unit,
+    onExportFile: (PlayableSong, String) -> Unit = { _, _ -> },
+    isLocalTab: Boolean = false,
+    onSelectLocalFolder: () -> Unit = {},
+    onScanDeviceAudio: () -> Unit = {},
     bottomPadding: Dp
 ) {
     if (songs.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Filled.LibraryMusic, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.outline)
+                Icon(
+                    if (isLocalTab) Icons.Filled.FolderOpen else Icons.Filled.LibraryMusic,
+                    null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.outline
+                )
                 Spacer(Modifier.height(16.dp))
-                Text("No songs yet", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    if (isLocalTab) "No local songs indexed yet" else "No songs yet",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
                 Spacer(Modifier.height(6.dp))
-                Text("Download songs online or search to add music", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (isLocalTab) "Select your local music folder or scan your phone storage to play local MP3 / M4A / FLAC files"
+                    else "Download songs online or search to add music",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (isLocalTab) {
+                    Spacer(Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = onSelectLocalFolder,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Select Local Folder", fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = onScanDeviceAudio,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Scan All Device Audio", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
         return
@@ -610,7 +729,8 @@ fun HybridSongsTab(
                 song = song,
                 onPlaySong = { onPlaySong(songs, index) },
                 onAddToPlaylist = { onAddToPlaylist(song) },
-                onRemoveDownload = { onRemoveDownload(song) }
+                onRemoveDownload = { onRemoveDownload(song) },
+                onExportFile = { fmt -> onExportFile(song, fmt) }
             )
         }
     }
@@ -622,7 +742,8 @@ fun HybridSongItem(
     song: PlayableSong,
     onPlaySong: () -> Unit,
     onAddToPlaylist: () -> Unit,
-    onRemoveDownload: () -> Unit
+    onRemoveDownload: () -> Unit,
+    onExportFile: (String) -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val trackNum = "%02d".format(index + 1)
@@ -690,6 +811,16 @@ fun HybridSongItem(
                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                         onClick = { showMenu = false; onAddToPlaylist() }
                     )
+                    DropdownMenuItem(
+                        text = { Text("Download MP3 File (Save to Phone)", color = MaterialTheme.colorScheme.onSurface) },
+                        leadingIcon = { Icon(Icons.Filled.AudioFile, null, tint = MaterialTheme.colorScheme.primary) },
+                        onClick = { showMenu = false; onExportFile("mp3") }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Download M4A File (Save to Phone)", color = MaterialTheme.colorScheme.onSurface) },
+                        leadingIcon = { Icon(Icons.Filled.SaveAlt, null, tint = MaterialTheme.colorScheme.primary) },
+                        onClick = { showMenu = false; onExportFile("m4a") }
+                    )
                     if (song is PlayableSong.Downloaded) {
                         DropdownMenuItem(
                             text = { Text("Remove Download", color = MaterialTheme.colorScheme.error) },
@@ -707,6 +838,9 @@ fun HybridSongItem(
 fun PlaylistsTab(
     playlists: List<PlaylistEntity>,
     favoriteSongs: List<PlayableSong>,
+    playlistStats: Map<Long, PlaylistOfflineInfo> = emptyMap(),
+    playlistBatchStatus: Map<Long, Pair<Int, Int>> = emptyMap(),
+    onTogglePlaylistDownload: (Long) -> Unit = {},
     onPlayFavoriteSongs: () -> Unit,
     onCreatePlaylist: () -> Unit,
     onDeletePlaylist: (PlaylistEntity) -> Unit,
@@ -904,6 +1038,14 @@ fun PlaylistsTab(
 
                     Spacer(Modifier.width(14.dp))
 
+                    val stats = playlistStats[playlist.id] ?: PlaylistOfflineInfo()
+                    val batchProgress = playlistBatchStatus[playlist.id]
+                    val subtitleText = if (stats.totalCount > 0) {
+                        "${stats.downloadedCount}/${stats.totalCount} downloaded • ${formatDate(playlist.createdAt)}"
+                    } else {
+                        "0 songs • ${formatDate(playlist.createdAt)}"
+                    }
+
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = playlist.name,
@@ -914,11 +1056,36 @@ fun PlaylistsTab(
                         )
                         Spacer(Modifier.height(3.dp))
                         Text(
-                            text = "Created ${formatDate(playlist.createdAt)}",
+                            text = subtitleText,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.secondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    if (batchProgress != null) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onTogglePlaylistDownload(playlist.id) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(4.dp))
+                            Text("${batchProgress.first}/${batchProgress.second}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                    } else if (stats.remainingCount > 0) {
+                        IconButton(onClick = { onTogglePlaylistDownload(playlist.id) }) {
+                            Icon(Icons.Filled.Download, contentDescription = "Download remaining", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    } else if (stats.totalCount > 0) {
+                        Icon(
+                            Icons.Filled.DownloadDone,
+                            contentDescription = "All downloaded",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 10.dp).size(20.dp)
                         )
                     }
 

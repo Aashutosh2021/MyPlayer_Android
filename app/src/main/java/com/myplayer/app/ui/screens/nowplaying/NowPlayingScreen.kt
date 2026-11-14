@@ -71,6 +71,7 @@ fun NowPlayingScreen(
     isDownloading: Boolean = false,
     onDownloadClick: () -> Unit = {},
     onRemoveDownloadClick: () -> Unit = {},
+    onExportAudioFileClick: (String) -> Unit = {},
     audioQuality: AudioQualityInfo = AudioQualityInfo(),
     lyricsViewModel: LyricsViewModel = hiltViewModel(),
     queue: List<com.myplayer.app.data.local.entity.SongEntity> = emptyList(),
@@ -293,6 +294,7 @@ fun NowPlayingScreen(
                 isDownloading = isDownloading,
                 onDownloadClick = onDownloadClick,
                 onRemoveDownloadClick = onRemoveDownloadClick,
+                onExportAudioFileClick = onExportAudioFileClick,
                 audioQuality = audioQuality,
                 lyricsViewModel = lyricsViewModel,
                 onOpenCustomizeStyles = onOpenCustomizeStyles
@@ -335,6 +337,44 @@ fun NowPlayingScreen(
                             onClick = {
                                 showMoreSheet = false
                                 if (isDownloaded) showRemoveConfirm = true else if (!isDownloading) onDownloadClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    "Download MP3 File (Save to Phone)",
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.AudioFile,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            },
+                            onClick = {
+                                showMoreSheet = false
+                                onExportAudioFileClick("mp3")
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    "Download M4A File (Save to Phone)",
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.SaveAlt,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            },
+                            onClick = {
+                                showMoreSheet = false
+                                onExportAudioFileClick("m4a")
                             }
                         )
                     }

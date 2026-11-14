@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest 
-    
     xmlns:android="http://schemas.android.com/apk/res/android"
-    
-    
     xmlns:tools="http://schemas.android.com/tools">
     <!-- Network access for online search and streaming -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -21,7 +18,12 @@
     <!-- Phone-Mic Active Noise Cancellation (ANC) & Transparency Mode -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <!-- Write to /Music/AIRA/ for downloads (API < 29) -->
+    <!-- Local audio file access across Android versions -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Write to /Music/MyPlayer & /Download/MyPlayer for API < 29 -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"
