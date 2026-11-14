@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Platform](https://img.shields.io/badge/Platform-Android%20(API%2028--36)-3DDC84?style=for-the-badge&logo=android&logoColor=white)
-![Version](https://img.shields.io/badge/Version-v6.2%20Stable-D2F83A?style=for-the-badge&labelColor=1A2216&logoColor=black)
+![Version](https://img.shields.io/badge/Version-v6.5%20Stable-D2F83A?style=for-the-badge&labelColor=1A2216&logoColor=black)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
 ![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
 ![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20MVVM%20%2B%20UDF-FF6F00?style=for-the-badge)
@@ -15,8 +15,15 @@
 
 <p align="center">
   <a href="https://github.com/Aashutosh2021/MyPlayer_Android/releases/latest">
-    <img src="https://img.shields.io/badge/Download-Latest%20APK%20(v6.2)-D2F83A?style=for-the-badge&labelColor=12160E&logo=android&logoColor=white" alt="Download Latest Release" />
+    <img src="https://img.shields.io/badge/Download-Latest%20APK%20(v6.5)-D2F83A?style=for-the-badge&labelColor=12160E&logo=android&logoColor=white" alt="Download Latest Release" />
   </a>
+  <a href="https://github.com/Aashutosh2021/Myplayer_Windows">
+    <img src="https://img.shields.io/badge/Windows%20Desktop-MyPlayer%20v8.2.3-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="MyPlayer for Windows" />
+  </a>
+</p>
+
+<p align="center">
+  Looking for desktop? Check out <a href="https://github.com/Aashutosh2021/Myplayer_Windows"><b>MyPlayer for Windows</b></a> (<a href="https://github.com/Aashutosh2021/Myplayer_Windows/releases/latest">Latest Windows Release</a>).
 </p>
 
 </div>
