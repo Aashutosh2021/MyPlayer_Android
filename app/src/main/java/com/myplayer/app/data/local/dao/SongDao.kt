@@ -24,10 +24,18 @@ interface SongDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSong(song: SongEntity): Unit
 
-    @Query("DELETE FROM songs WHERE path LIKE :folderUri || '%'")
+    @Query("DELETE FROM songs WHERE path LIKE :folderUri || '%' AND id NOT IN (SELECT songId FROM playlist_songs) AND id NOT IN (SELECT id FROM downloaded_songs)")
     fun deleteSongsByFolder(folderUri: String): Unit
 
-    @Query("DELETE FROM songs WHERE path NOT LIKE 'online://%' AND id NOT LIKE 'spotify:%'")
+    @Query("""
+        DELETE FROM songs 
+        WHERE path NOT LIKE 'online://%' 
+          AND id NOT LIKE 'spotify:%' 
+          AND (videoId IS NULL OR videoId = '')
+          AND id NOT IN (SELECT id FROM downloaded_songs)
+          AND id NOT IN (SELECT songId FROM playlist_songs)
+          AND id NOT IN (SELECT songId FROM favorites)
+    """)
     fun clearAllLocalSongs(): Unit
 
     @Query("SELECT * FROM songs ORDER BY dateAdded DESC LIMIT 50")

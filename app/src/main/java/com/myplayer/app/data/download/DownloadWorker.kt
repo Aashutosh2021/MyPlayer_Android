@@ -332,15 +332,30 @@ class DownloadWorker @AssistedInject constructor(
 
             audioTagHelper.scanDownloadedFile(context, savedPath, title, artist)
 
-            // Synchronize local path & offline poster in SongDao
+            // Synchronize offline poster & ensure song entry exists in SongDao without losing online:// marker
             try {
                 val existingSong = songDao.getSongById(videoId) ?: songDao.getSongByVideoId(videoId)
                 if (existingSong != null) {
-                    songDao.updateSongPath(existingSong.id, savedPath)
+                    songDao.updateSongVideoId(existingSong.id, videoId)
                     songDao.updateSongArtwork(existingSong.id, localThumbnailUri)
+                } else {
+                    songDao.insertSong(
+                        com.myplayer.app.data.local.entity.SongEntity(
+                            id = videoId,
+                            title = title,
+                            artist = artist,
+                            album = "Downloads",
+                            duration = durationMs,
+                            path = "online://$videoId",
+                            albumArt = localThumbnailUri,
+                            dateAdded = System.currentTimeMillis(),
+                            playCount = 0,
+                            videoId = videoId
+                        )
+                    )
                 }
             } catch (e: Exception) {
-                Log.e("DownloadWorker", "Failed to synchronize local song path/artwork in SongDao", e)
+                Log.e("DownloadWorker", "Failed to synchronize song metadata in SongDao", e)
             }
 
             // Automatically download & cache lyrics + save companion .lrc file
