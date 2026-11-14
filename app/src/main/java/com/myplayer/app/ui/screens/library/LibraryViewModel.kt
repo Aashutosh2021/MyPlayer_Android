@@ -7,6 +7,8 @@ import com.myplayer.app.data.repository.DownloadRepository
 import com.myplayer.app.data.repository.HybridLibraryRepository
 import com.myplayer.app.data.repository.MusicRepository
 import com.myplayer.app.data.repository.PlayableSong
+import com.myplayer.app.data.spotify.SpotifyIntegrationManager
+import com.myplayer.app.data.youtube.YouTubeIntegrationManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -16,7 +18,9 @@ import javax.inject.Inject
 class LibraryViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val hybridLibraryRepository: HybridLibraryRepository,
-    private val downloadRepository: DownloadRepository
+    private val downloadRepository: DownloadRepository,
+    val spotifyManager: SpotifyIntegrationManager,
+    val youtubeManager: YouTubeIntegrationManager
 ) : ViewModel() {
 
     val playlists: StateFlow<List<PlaylistEntity>> = repository.getAllPlaylists()
@@ -35,6 +39,50 @@ class LibraryViewModel @Inject constructor(
     val favoriteSongs: StateFlow<List<PlayableSong>> = repository.getFavoriteSongs()
         .map { list -> list.map { PlayableSong.Local(it) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _isImportingPlaylist = MutableStateFlow(false)
+    val isImportingPlaylist: StateFlow<Boolean> = _isImportingPlaylist.asStateFlow()
+
+    private val _importStatusMessage = MutableStateFlow<String?>(null)
+    val importStatusMessage: StateFlow<String?> = _importStatusMessage.asStateFlow()
+
+    fun clearImportStatusMessage() {
+        _importStatusMessage.value = null
+    }
+
+    fun importSpotifyPlaylist(urlOrId: String, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            _isImportingPlaylist.value = true
+            val res = spotifyManager.importPlaylistByUrl(urlOrId)
+            _isImportingPlaylist.value = false
+            res.onSuccess { (title, count) ->
+                val msg = "Imported '$title' ($count songs) from Spotify!"
+                _importStatusMessage.value = msg
+                onResult(true, msg)
+            }.onFailure { err ->
+                val msg = "Failed to import Spotify playlist: ${err.message ?: "Could not load playlist"}"
+                _importStatusMessage.value = msg
+                onResult(false, msg)
+            }
+        }
+    }
+
+    fun importYouTubePlaylist(urlOrId: String, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            _isImportingPlaylist.value = true
+            val res = youtubeManager.importPlaylistByUrl(urlOrId)
+            _isImportingPlaylist.value = false
+            res.onSuccess { (title, count) ->
+                val msg = "Imported '$title' ($count songs) from YouTube!"
+                _importStatusMessage.value = msg
+                onResult(true, msg)
+            }.onFailure { err ->
+                val msg = "Failed to import YouTube playlist: ${err.message ?: "Could not load playlist"}"
+                _importStatusMessage.value = msg
+                onResult(false, msg)
+            }
+        }
+    }
 
     fun createPlaylist(name: String) {
         viewModelScope.launch { repository.createPlaylist(name) }
@@ -60,5 +108,3 @@ class LibraryViewModel @Inject constructor(
         }
     }
 }
-
-

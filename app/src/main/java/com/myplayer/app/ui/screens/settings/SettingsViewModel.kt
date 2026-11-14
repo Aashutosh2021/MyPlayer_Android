@@ -51,6 +51,7 @@ class SettingsViewModel @Inject constructor(
     private val backupRestoreManager: BackupRestoreManager,
     private val updateChecker: UpdateChecker,
     val spotifyManager: com.myplayer.app.data.spotify.SpotifyIntegrationManager,
+    val youtubeManager: com.myplayer.app.data.youtube.YouTubeIntegrationManager,
     private val audioSettingsRepository: AudioSettingsRepository,
     val audioPlaybackStore: com.myplayer.app.data.preferences.AudioPlaybackStore,
     val audioFeatureManagers: com.myplayer.app.playback.AudioFeatureManagers
@@ -65,6 +66,10 @@ class SettingsViewModel @Inject constructor(
 
     private val _spotifySyncMessage = MutableStateFlow<String?>(null)
     val spotifySyncMessage = _spotifySyncMessage.asStateFlow()
+
+    val isYouTubeLoggedIn = youtubeManager.isLoggedIn
+    val youtubeUsername = youtubeManager.username
+    val isYouTubeSyncing = youtubeManager.isSyncing
 
     fun clearSpotifySyncMessage() {
         _spotifySyncMessage.value = null
@@ -87,6 +92,34 @@ class SettingsViewModel @Inject constructor(
 
     fun logoutSpotify() {
         spotifyManager.logout()
+    }
+
+    fun syncYouTube() {
+        viewModelScope.launch {
+            val res = youtubeManager.syncAllYouTubeLibraryAndPlaylists()
+            res.onSuccess { result ->
+                _spotifySyncMessage.value =
+                    "Synced ${result.playlistsCount} YouTube playlists, ${result.likedSongsCount} liked songs & ${result.recommendationsCount} AI recommendations!"
+            }.onFailure { e ->
+                _spotifySyncMessage.value = "YouTube sync failed: ${e.message}"
+            }
+        }
+    }
+
+    fun importYouTubePlaylist(urlOrId: String) {
+        viewModelScope.launch {
+            _spotifySyncMessage.value = "Importing YouTube playlist..."
+            val res = youtubeManager.importPlaylistByUrl(urlOrId)
+            res.onSuccess { (title, count) ->
+                _spotifySyncMessage.value = "Imported '$title' ($count songs) from YouTube!"
+            }.onFailure { e ->
+                _spotifySyncMessage.value = "Failed to import YouTube playlist: ${e.message}"
+            }
+        }
+    }
+
+    fun logoutYouTube() {
+        youtubeManager.logout()
     }
 
     private val _backupState = MutableStateFlow<BackupRestoreState>(BackupRestoreState.Idle)
@@ -232,5 +265,3 @@ class SettingsViewModel @Inject constructor(
         }
     }
 }
-
-

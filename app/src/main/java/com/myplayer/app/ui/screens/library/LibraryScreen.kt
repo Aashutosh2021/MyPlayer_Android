@@ -95,39 +95,94 @@ fun LibraryScreen(
         )
     }
 
+    val importStatusMessage by viewModel.importStatusMessage.collectAsStateWithLifecycle()
+    importStatusMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearImportStatusMessage() },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.primary,
+            textContentColor = MaterialTheme.colorScheme.onSurface,
+            title = { Text("Playlist Import", fontWeight = FontWeight.Bold) },
+            text = { Text(msg) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.clearImportStatusMessage() }) {
+                    Text("OK", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
     if (showCreatePlaylistDialog) {
+        val trimmedInput = newPlaylistName.trim()
+        val isSpotifyInput = trimmedInput.contains("spotify.com") ||
+            trimmedInput.contains("spotify:playlist") ||
+            (trimmedInput.length == 22 && !trimmedInput.contains(" "))
+        val isYouTubeInput = trimmedInput.contains("youtube.com") ||
+            trimmedInput.contains("youtu.be") ||
+            trimmedInput.contains("list=") ||
+            trimmedInput.startsWith("PL") ||
+            trimmedInput.startsWith("VLPL") ||
+            trimmedInput.startsWith("OLAK5uy_")
+
         AlertDialog(
             onDismissRequest = { showCreatePlaylistDialog = false; newPlaylistName = "" },
             containerColor = MaterialTheme.colorScheme.surface,
             titleContentColor = MaterialTheme.colorScheme.primary,
             textContentColor = MaterialTheme.colorScheme.secondary,
-            title = { Text("New Playlist", fontWeight = FontWeight.Bold) },
-            text = {
-                OutlinedTextField(
-                    value = newPlaylistName,
-                    onValueChange = { newPlaylistName = it },
-                    label = { Text("Playlist name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        focusedLabelColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                        unfocusedLabelColor = MaterialTheme.colorScheme.secondary,
-                        cursorColor = MaterialTheme.colorScheme.primary
-                    )
+            title = {
+                Text(
+                    when {
+                        isYouTubeInput -> "Import YouTube Playlist"
+                        isSpotifyInput -> "Import Spotify Playlist"
+                        else -> "Create or Import Playlist"
+                    },
+                    fontWeight = FontWeight.Bold
                 )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = newPlaylistName,
+                        onValueChange = { newPlaylistName = it },
+                        label = { Text("Playlist name, YouTube link, or Spotify link") },
+                        placeholder = { Text("e.g. Gym Mix or https://music.youtube.com/playlist?list=...") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            focusedLabelColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                            unfocusedLabelColor = MaterialTheme.colorScheme.secondary,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Text(
+                        text = "Tip: Paste any YouTube Music, YouTube, or Spotify playlist URL to import all tracks into MyPlayer!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        if (newPlaylistName.isNotBlank()) {
-                            viewModel.createPlaylist(newPlaylistName.trim())
-                            newPlaylistName = ""; showCreatePlaylistDialog = false
+                        if (trimmedInput.isNotBlank()) {
+                            when {
+                                isYouTubeInput -> viewModel.importYouTubePlaylist(trimmedInput)
+                                isSpotifyInput -> viewModel.importSpotifyPlaylist(trimmedInput)
+                                else -> viewModel.createPlaylist(trimmedInput)
+                            }
+                            newPlaylistName = ""
+                            showCreatePlaylistDialog = false
                         }
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                ) { Text("Create", fontWeight = FontWeight.Bold) }
+                ) {
+                    Text(
+                        if (isYouTubeInput || isSpotifyInput) "Import" else "Create",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             },
             dismissButton = {
                 TextButton(

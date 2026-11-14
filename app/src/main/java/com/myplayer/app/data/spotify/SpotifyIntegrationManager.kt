@@ -707,6 +707,147 @@ class SpotifyIntegrationManager @Inject constructor(
         return out
     }
 
+    fun extractPlaylistId(input: String): String? {
+        val trimmed = input.trim()
+        val urlRegex = Regex("""(?:spotify\.com/playlist/|spotify:playlist:)([a-zA-Z0-9]{22})""")
+        val match = urlRegex.find(trimmed)
+        if (match != null) return match.groupValues[1]
+        if (trimmed.matches(Regex("^[a-zA-Z0-9]{22}$"))) return trimmed
+        return null
+    }
+
+    suspend fun fetchPlaylistDetailsAndTracks(urlOrId: String): Result<Pair<String, List<SpotifyTrackSeed>>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val playlistId = extractPlaylistId(urlOrId)
+                ?: throw IllegalArgumentException("Invalid Spotify playlist URL or ID")
+
+            val embedResult = fetchPlaylistFromEmbed(playlistId)
+            if (embedResult != null && embedResult.second.isNotEmpty()) {
+                return@runCatching embedResult
+            }
+
+            val token = getValidAccessToken()
+            if (!token.isNullOrBlank()) {
+                val tracks = fetchPlaylistTracks(token, playlistId)
+                if (tracks.isNotEmpty()) {
+                    val title = embedResult?.first?.ifBlank { "Spotify Playlist" } ?: "Spotify Playlist"
+                    return@runCatching title to tracks
+                }
+            }
+
+            if (embedResult != null) {
+                return@runCatching embedResult
+            }
+
+            throw IllegalStateException("Could not load tracks for Spotify playlist $playlistId")
+        }
+    }
+
+    private suspend fun fetchPlaylistFromEmbed(playlistId: String): Pair<String, List<SpotifyTrackSeed>>? {
+        return try {
+            val embedUrl = "https://open.spotify.com/embed/playlist/$playlistId"
+            val html = httpGet(
+                embedUrl,
+                mapOf(
+                    "User-Agent" to USER_AGENT_DESKTOP,
+                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                )
+            )
+
+            val scriptRegex = Regex("""<script id="__NEXT_DATA__" type="application/json">([^<]+)</script>""")
+            val match = scriptRegex.find(html) ?: return null
+            val jsonStr = match.groupValues[1]
+            val root = JSONObject(jsonStr)
+
+            val entity = root.optJSONObject("props")
+                ?.optJSONObject("pageProps")
+                ?.optJSONObject("state")
+                ?.optJSONObject("data")
+                ?.optJSONObject("entity") ?: return null
+
+            val playlistTitle = entity.optString("title").ifBlank {
+                entity.optString("name").ifBlank { "Spotify Playlist" }
+            }
+
+            val trackList = entity.optJSONArray("trackList") ?: return playlistTitle to emptyList()
+            val seeds = mutableListOf<SpotifyTrackSeed>()
+
+            for (i in 0 until trackList.length()) {
+                val item = trackList.getJSONObject(i)
+                val uri = item.optString("uri")
+                val trackId = uri.substringAfterLast(":")
+                val title = item.optString("title")
+                val subtitle = item.optString("subtitle")
+                val dur = item.optLong("duration", 0L)
+                val img = item.optJSONObject("visualIdentity")
+                    ?.optJSONArray("image")
+                    ?.optJSONObject(0)
+                    ?.optString("url")
+
+                if (trackId.isNotBlank() && title.isNotBlank()) {
+                    seeds.add(
+                        SpotifyTrackSeed(
+                            id = trackId,
+                            title = title,
+                            artist = subtitle.ifBlank { "Unknown Artist" },
+                            durationMs = dur,
+                            weight = 1.0f,
+                            artworkUrl = img
+                        )
+                    )
+                }
+            }
+            playlistTitle to seeds
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchPlaylistFromEmbed failed for $playlistId", e)
+            null
+        }
+    }
+
+    suspend fun importPlaylistByUrl(urlOrId: String): Result<Pair<String, Int>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val (playlistTitle, tracks) = fetchPlaylistDetailsAndTracks(urlOrId).getOrThrow()
+            if (tracks.isEmpty()) {
+                throw IllegalStateException("Playlist is empty or could not be loaded")
+            }
+
+            val existingPl = playlistDao.getPlaylistByName(playlistTitle)
+            val plId = existingPl?.id ?: playlistDao.insertPlaylist(PlaylistEntity(name = playlistTitle))
+
+            val trackEntities = tracks.map { seed ->
+                SongEntity(
+                    id = "spotify:${seed.id}",
+                    title = seed.title,
+                    artist = seed.artist,
+                    album = playlistTitle,
+                    duration = seed.durationMs,
+                    path = "online://${seed.id}",
+                    albumArt = seed.artworkUrl,
+                    dateAdded = System.currentTimeMillis()
+                )
+            }
+
+            val crossRefs = tracks.mapIndexed { pos, seed ->
+                PlaylistSongCrossReference(playlistId = plId, songId = "spotify:${seed.id}", position = pos)
+            }
+
+            songDao.insertSongs(trackEntities)
+            playlistDao.insertPlaylistSongs(crossRefs)
+
+            tracks.take(50).forEach { track ->
+                aiModel.learnFromInteraction(
+                    videoId = track.id,
+                    title = track.title,
+                    artist = track.artist,
+                    durationMs = track.durationMs,
+                    reward = 1.5f
+                )
+            }
+
+            playlistTitle to tracks.size
+        }
+    }
+
     suspend fun fetchUserPlaylists(token: String): List<SpotifyPlaylistSummary> {
         val out = mutableListOf<SpotifyPlaylistSummary>()
         // 1. Prefer GraphQL libraryV3 (much less prone to 429 rate limiting than REST!)
