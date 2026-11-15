@@ -153,26 +153,9 @@ fun NowPlayingScreen(
     }
 
     if (showQualityDetails) {
-        AlertDialog(
-            onDismissRequest = { showQualityDetails = false },
-            title = { Text("Audio Quality") },
-            text = {
-                Column {
-                    Text("Badge: ${audioQuality.displayBadge}", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Text("Format: ${audioQuality.format}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Technical: ${audioQuality.technicalSummary}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Source: ${audioQuality.sourceName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showQualityDetails = false }) {
-                    Text("OK", color = MaterialTheme.colorScheme.primary)
-                }
-            },
-            containerColor = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        SignalPathInspectorDialog(
+            qualityInfo = audioQuality,
+            onDismiss = { showQualityDetails = false }
         )
     }
 

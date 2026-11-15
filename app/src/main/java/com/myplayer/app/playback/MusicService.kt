@@ -59,6 +59,14 @@ class MusicService : MediaSessionService() {
     lateinit var spatialAudioProcessor: SpatialAudioProcessor
     @Inject
     lateinit var cacheDataSourceFactory: androidx.media3.datasource.cache.CacheDataSource.Factory
+    @Inject
+    lateinit var sponsorBlockManager: com.myplayer.app.data.sponsorblock.SponsorBlockManager
+    @Inject
+    lateinit var upgradeHandoffManager: UpgradeHandoffManager
+    @Inject
+    lateinit var bitPerfectUsbController: BitPerfectUsbController
+    @Inject
+    lateinit var mixAnalyzer: com.myplayer.app.playback.mix.MixAnalyzer
 
     @Volatile private var currentAudioPlaybackState = AudioPlaybackState()
 
@@ -171,10 +179,32 @@ class MusicService : MediaSessionService() {
             .setCallback(callback)
             .build()
 
+        sponsorBlockManager.attachToPlayer(
+            scope = serviceScope,
+            player = player,
+            currentVideoIdProvider = {
+                playbackStateManager.currentOnlineSong.value?.videoId
+                    ?: playbackStateManager.currentSong.value?.id?.takeIf { it.startsWith("online://") }
+            }
+        )
+
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 super.onMediaItemTransition(mediaItem, reason)
-                // We can broadcast song changes or update recent history here
+                playbackStateManager.currentOnlineSong.value?.let { online ->
+                    val tier = currentAudioPlaybackState.streamingQuality
+                    val preferLossless = tier != com.myplayer.app.data.preferences.AudioQualityTier.YOUTUBE_MUSIC &&
+                        tier != com.myplayer.app.data.preferences.AudioQualityTier.DATA_SAVER
+                    upgradeHandoffManager.scheduleMidStreamUpgrade(
+                        scope = serviceScope,
+                        player = player,
+                        videoId = online.videoId,
+                        title = online.title,
+                        artist = online.artist,
+                        durationMs = online.durationMs,
+                        preferLossless = preferLossless
+                    )
+                }
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -261,6 +291,7 @@ class MusicService : MediaSessionService() {
             audioPlaybackStore.stateFlow.collect { state ->
                 currentAudioPlaybackState = state
                 masterAudioDspProcessor.updateState(state)
+                bitPerfectUsbController.setBitPerfectEnabled(state.bitPerfectMode || state.usbExclusiveOutput)
                 audioFeatureManagers.toggleSystemAudioEffects(player.audioSessionId, state.systemAudioEffects)
                 spatialAudioProcessor.updateParams(
                     SpatialParams(

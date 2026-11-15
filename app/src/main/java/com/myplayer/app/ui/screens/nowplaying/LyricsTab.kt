@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
@@ -197,19 +198,51 @@ fun LyricsTab(
 
                 LyricsScriptPicker(modifier = Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 8.dp, end = 48.dp))
 
-                IconButton(
-                    onClick = onAddCustomLyrics,
+                val shareContext = androidx.compose.ui.platform.LocalContext.current
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                        .size(32.dp)
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(
-                        Icons.Filled.Edit,
-                        contentDescription = "Edit Lyrics",
-                        tint = textMuted,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    IconButton(
+                        onClick = {
+                            val lines = if (lyricsState.syncedLines.isNotEmpty()) {
+                                val idx = lyricsState.syncedLines.indexOfLast { it.first <= positionMs.value }.coerceAtLeast(0)
+                                lyricsState.syncedLines.drop(idx).map { it.second }.filter { it.isNotBlank() }.take(5)
+                                    .ifEmpty { lyricsState.syncedLines.map { it.second }.filter { it.isNotBlank() }.take(5) }
+                            } else {
+                                (lyricsState.result.plainLyrics ?: "").lines().filter { it.isNotBlank() }.take(5)
+                            }
+                            if (lines.isNotEmpty()) {
+                                LyricCardExporter.shareLyricCardPng(
+                                    context = shareContext,
+                                    songTitle = lyricsState.result.trackName,
+                                    artistName = lyricsState.result.artistName,
+                                    selectedLines = lines
+                                )
+                            }
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Share,
+                            contentDescription = "Share Lyric Card",
+                            tint = textMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onAddCustomLyrics,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "Edit Lyrics",
+                            tint = textMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }

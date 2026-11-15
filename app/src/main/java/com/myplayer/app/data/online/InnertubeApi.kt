@@ -28,10 +28,20 @@ class YouTubeStreamBlockedException(message: String) : Exception(message)
  * No API key is required — uses the public web client credentials.
  */
 @Singleton
-class InnertubeApi @Inject constructor(
+class InnertubeApi(
     private val okHttpClient: OkHttpClient,
     private val enc: StringEncryptionManager  // Phase 3: runtime key decryption
 ) {
+    private var poTokenGenerator: com.myplayer.app.data.online.potoken.PoTokenGenerator? = null
+
+    @Inject
+    constructor(
+        okHttpClient: OkHttpClient,
+        enc: StringEncryptionManager,
+        poTokenGenerator: com.myplayer.app.data.online.potoken.PoTokenGenerator
+    ) : this(okHttpClient, enc) {
+        this.poTokenGenerator = poTokenGenerator
+    }
 
     init {
         // Initialize NewPipe exactly once with the Hilt-injected OkHttpClient.
@@ -653,6 +663,9 @@ class InnertubeApi @Inject constructor(
         }
     }
 
+    fun findVideoIdForUrl(url: String): String? =
+        streamUrlCache.entries.firstOrNull { it.value.url == url }?.key
+
     /**
      * Invalidates any cached stream URL for the given video ID.
      */
@@ -756,8 +769,17 @@ class InnertubeApi @Inject constructor(
                     }
                 }
 
-                val contentUrl = optimalStream?.getContent()
+                var contentUrl = optimalStream?.getContent()
                 if (!contentUrl.isNullOrBlank()) {
+                    if (contentUrl.contains("googlevideo.com", ignoreCase = true) && !contentUrl.contains("&pot=")) {
+                        val poBundle = runCatching {
+                            poTokenGenerator?.getOrGeneratePoToken("CgtNeVBsYXllclY2OA==", videoId)
+                        }.getOrNull()
+                        val poToken = poBundle?.streamingDataPoToken
+                        if (!poToken.isNullOrBlank()) {
+                            contentUrl = "$contentUrl&pot=$poToken"
+                        }
+                    }
                     cacheStreamUrl(videoId, contentUrl)
                 }
                 contentUrl

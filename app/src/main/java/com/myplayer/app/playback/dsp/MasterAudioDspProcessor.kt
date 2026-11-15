@@ -142,6 +142,21 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
     @Volatile private var audioLabGains15: FloatArray? = null
     @Volatile private var audioLabPreampDb: Float = 0f
     @Volatile private var audioLabAutoPreamp: Boolean = true
+    private val autoEqBands10 = FloatArray(10)
+
+    fun setBandGain(bandIndex: Int, gainDb: Float) {
+        if (bandIndex !in autoEqBands10.indices) return
+        autoEqBands10[bandIndex] = gainDb.coerceIn(-12f, 12f)
+        audioLabGains15 = map10BandsTo15Bands(autoEqBands10)
+        val sr = if (inputAudioFormat.sampleRate > 0) inputAudioFormat.sampleRate else lastSampleRate
+        pushConfig(sr)
+    }
+
+    fun setEqualizerEnabled(enabled: Boolean) {
+        audioLabEqEnabled = enabled
+        val sr = if (inputAudioFormat.sampleRate > 0) inputAudioFormat.sampleRate else lastSampleRate
+        pushConfig(sr)
+    }
 
     private val eqLock = Any()
     private val kotlinEq = KotlinEq()

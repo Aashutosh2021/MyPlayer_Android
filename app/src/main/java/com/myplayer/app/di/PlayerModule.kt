@@ -299,7 +299,8 @@ object PlayerModule {
     @Singleton
     fun provideCacheDataSourceFactory(
         @ApplicationContext context: Context,
-        simpleCache: SimpleCache
+        simpleCache: SimpleCache,
+        playbackSourceResolverProvider: javax.inject.Provider<com.myplayer.app.playback.PlaybackSourceResolver>
     ): CacheDataSource.Factory {
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
@@ -308,8 +309,13 @@ object PlayerModule {
             .setKeepPostFor302Redirects(true)
             .setUserAgent("com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip")
 
-        // Wrap HTTP DataSource in 9-Second Chunked Range DataSource
-        val chunkedHttpFactory = NineSecondChunkDataSource.Factory(httpDataSourceFactory)
+        // Wrap HTTP DataSource in RenewingDataSource (429 backoff + 403/410 live URL renewal)
+        // and then in 9-Second Chunked Range DataSource
+        val renewingHttpFactory = com.myplayer.app.playback.RenewingDataSource.Factory(
+            upstreamFactory = httpDataSourceFactory,
+            renewStreamUrl = { failedUrl -> playbackSourceResolverProvider.get().renewExpiredUrlBlocking(failedUrl) }
+        )
+        val chunkedHttpFactory = NineSecondChunkDataSource.Factory(renewingHttpFactory)
         val upstreamFactory = DefaultDataSource.Factory(context, chunkedHttpFactory)
 
         return CacheDataSource.Factory()

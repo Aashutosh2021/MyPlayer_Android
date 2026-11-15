@@ -42,6 +42,7 @@ class PlaybackSourceResolver @Inject constructor(
     val isResolving: StateFlow<Boolean> = _isResolving.asStateFlow()
 
     private val streamUrlTimestamps = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val urlToVideoId = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val STREAM_URL_TTL_MS = 5 * 60 * 60 * 1000L
 
     private val prefs by lazy { context.getSharedPreferences("spotify_yt_id_mapping", Context.MODE_PRIVATE) }
@@ -201,6 +202,19 @@ class PlaybackSourceResolver @Inject constructor(
         return resolveOnlineStream(videoId, setCustomError = setCustomError, forceRefresh = true)
     }
 
+    fun renewExpiredUrlBlocking(failedUrl: String): String? {
+        val videoId = urlToVideoId[failedUrl] ?: innertubeApi.findVideoIdForUrl(failedUrl) ?: return null
+        innertubeApi.invalidateCachedStreamUrl(videoId)
+        streamUrlTimestamps.remove(videoId)
+        val fresh = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            resolveFreshStreamUrl(videoId)
+        }
+        if (!fresh.isNullOrBlank()) {
+            urlToVideoId[fresh] = videoId
+        }
+        return fresh
+    }
+
     fun cancelPrefetches() {
         activePrefetchJob?.cancel()
         innertubeApi.cancelAllPrefetches()
@@ -253,6 +267,7 @@ class PlaybackSourceResolver @Inject constructor(
 
             if (!streamUrl.isNullOrBlank()) {
                 streamUrlTimestamps[videoId] = System.currentTimeMillis()
+                urlToVideoId[streamUrl] = videoId
                 _currentAudioQuality.value = losslessStreamResolver.inspectQuality(streamUrl, isLocalFile = false)
                 return streamUrl
             } else {
