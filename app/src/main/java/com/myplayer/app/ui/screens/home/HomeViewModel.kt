@@ -9,6 +9,9 @@ import com.myplayer.app.data.local.datastore.SettingsDataStore
 import com.myplayer.app.data.local.entity.SongEntity
 import com.myplayer.app.data.online.InnertubeApi
 import com.myplayer.app.data.online.model.OnlineSong
+import com.myplayer.app.data.radio.LiveRadioRepository
+import com.myplayer.app.data.radio.LiveRadioStation
+import com.myplayer.app.data.recognize.ShazamRecognizer
 import com.myplayer.app.data.recommendation.RecommendationCoordinator
 import com.myplayer.app.data.recommendation.ai.OnDeviceMusicAiModel
 import com.myplayer.app.data.recommendation.api.LastFmRecommendationSource
@@ -47,7 +50,9 @@ class HomeViewModel @Inject constructor(
     private val lastFmRecommendationSource: LastFmRecommendationSource,
     private val aiModel: OnDeviceMusicAiModel,
     val spotifyManager: com.myplayer.app.data.spotify.SpotifyIntegrationManager,
-    val youtubeManager: com.myplayer.app.data.youtube.YouTubeIntegrationManager
+    val youtubeManager: com.myplayer.app.data.youtube.YouTubeIntegrationManager,
+    val liveRadioRepository: LiveRadioRepository,
+    val shazamRecognizer: ShazamRecognizer
 ) : ViewModel() {
 
     private val _userState = MutableStateFlow<RecommendationUserState?>(null)
@@ -192,7 +197,6 @@ class HomeViewModel @Inject constructor(
     val isPlaying = musicController.isPlaying
 
     init {
-        // Auto-sync username from legacy prefs or myplayer_ui_prefs if not yet in dataStore
         viewModelScope.launch(Dispatchers.IO) {
             val current = settingsDataStore.userName.first()
             if (current.isBlank()) {
@@ -268,10 +272,8 @@ class HomeViewModel @Inject constructor(
                     val playedArtist = played[2]
                     val playedDur = played[3].toLongOrNull() ?: 0L
 
-                    // Cancel any previous background AI/Spotify/YouTube job so 100% bandwidth goes to the clicked song!
                     aiTrainingJob?.cancel()
                     aiTrainingJob = viewModelScope.launch(Dispatchers.IO) {
-                        // Let the clicked song resolve and start playing first with ZERO competition!
                         delay(4_000L)
 
                         aiModel.onSongTransition(
@@ -281,7 +283,6 @@ class HomeViewModel @Inject constructor(
                             durationMs = playedDur
                         )
 
-                        // Wait another 8s (total 12s of listening) before syncing with Spotify / YouTube Music
                         if (spotifyManager.isLoggedIn.value || youtubeManager.isLoggedIn.value) {
                             delay(8_000L)
                             val stillPlayingSame =
@@ -317,7 +318,7 @@ class HomeViewModel @Inject constructor(
             }
         }
 
-        // 5. Periodic auto-refresh every 15 minutes (not constantly)
+        // 5. Periodic auto-refresh every 15 minutes
         viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(15 * 60 * 1000L)
@@ -347,7 +348,6 @@ class HomeViewModel @Inject constructor(
                 val worldTrending = aiModel.generateWorldTrendingHotlist(limit = 50)
                 if (worldTrending.isNotEmpty()) {
                     _hotlistSongs.value = worldTrending
-                    // Prefetch top 2 Hotlist songs so tapping Play on Hotlist is 0ms instant!
                     innertubeApi.prefetchVisibleStreams(worldTrending.take(2).map { it.videoId })
                 }
             } catch (e: Exception) {
@@ -355,6 +355,12 @@ class HomeViewModel @Inject constructor(
             } finally {
                 _isLoadingHotlist.value = false
             }
+        }
+    }
+
+    fun refreshHomeFeed() {
+        viewModelScope.launch(Dispatchers.IO) {
+            refreshAiRecommendations()
         }
     }
 
@@ -391,12 +397,12 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun getGenreKeywords(category: String): List<String> = when (category.lowercase()) {
-        "deep focus" -> listOf("focus", "ambient", "drone", "study", "lofi", "lo-fi", "instrumental", "calm", "binaural", "relax")
-        "acoustic chill" -> listOf("acoustic", "guitar", "unplugged", "folk", "indie", "warm", "strings", "chill", "vocal")
-        "late night" -> listOf("night", "synthwave", "electro", "retro", "midnight", "drive", "dark", "neon", "after hours")
-        "discoveries" -> listOf("discover", "indie", "new", "fresh", "rising", "alt", "underground", "gems")
+        "deep focus", "focus" -> listOf("focus", "ambient", "drone", "study", "lofi", "lo-fi", "instrumental", "calm", "binaural", "relax")
+        "acoustic chill", "relax" -> listOf("acoustic", "guitar", "unplugged", "folk", "indie", "warm", "strings", "chill", "vocal")
+        "late night", "sleep" -> listOf("night", "synthwave", "electro", "retro", "midnight", "drive", "dark", "neon", "after hours", "sleep")
+        "discoveries", "energize" -> listOf("discover", "indie", "new", "fresh", "rising", "alt", "underground", "gems", "energy")
         "party" -> listOf("party", "dance", "club", "dj", "remix", "edm", "disco", "celebration", "fest", "bass", "electro", "house", "groove", "rave")
-        "blues" -> listOf("blues", "soul", "jazz", "r&b", "rhythm", "acoustic", "guitar", "swing")
+        "blues", "romance" -> listOf("blues", "soul", "jazz", "r&b", "rhythm", "acoustic", "guitar", "swing", "love", "romance")
         "sad" -> listOf("sad", "slow", "cry", "broken", "heartbreak", "tear", "alone", "lonely", "dark", "pain", "melancholy", "grief")
         "hip hop" -> listOf("hip hop", "hiphop", "rap", "trap", "flow", "rhyme", "drank", "drill", "freestyle", "cypher", "mc")
         "chill" -> listOf("chill", "lofi", "lo-fi", "relax", "calm", "peace", "ambient", "meditation", "sleep", "soft", "breeze", "easy")
@@ -478,5 +484,42 @@ class HomeViewModel @Inject constructor(
 
     fun playRecommendedSong(song: RecommendationSong) {
         playRecommendedSongs(listOf(song), 0)
+    }
+
+    /** Plays a Live Radio station from OpenTune's 50,000+ Radio Browser directory. */
+    fun playRadioStation(station: LiveRadioStation) {
+        val onlineRadio = OnlineSong(
+            videoId = "radio:${station.uuid}",
+            title = station.name,
+            artist = listOf(station.state, station.country)
+                .filter { it.isNotBlank() }
+                .joinToString(", ")
+                .ifBlank { "Live Radio" },
+            thumbnailUrl = station.faviconUrl ?: "",
+            durationMs = 0L,
+            durationText = "LIVE",
+            streamUrl = station.streamUrl
+        )
+        musicController.playOnlineSong(onlineRadio)
+    }
+
+    /** Searches YouTube Music for a Shazam-recognized track and starts playback immediately. */
+    fun playRecognizedSong(title: String, artist: String, coverUrl: String?, onStarted: () -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val found = runCatching {
+                innertubeApi.search("$title $artist".trim(), filtered = true).songs.firstOrNull()
+            }.getOrNull()
+            if (found != null) {
+                val track = if (found.thumbnailUrl.isBlank() && !coverUrl.isNullOrBlank()) {
+                    found.copy(thumbnailUrl = coverUrl)
+                } else {
+                    found
+                }
+                withContext(Dispatchers.Main) {
+                    musicController.playOnlineSong(track)
+                    onStarted()
+                }
+            }
+        }
     }
 }

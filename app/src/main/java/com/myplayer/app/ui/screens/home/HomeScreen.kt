@@ -1,25 +1,97 @@
 package com.myplayer.app.ui.screens.home
 
 import java.util.Calendar
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.*
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.*
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Celebration
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Equalizer
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Nightlight
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -27,12 +99,27 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.myplayer.app.R
 import com.myplayer.app.data.local.entity.SongEntity
 import com.myplayer.app.data.recommendation.model.RecommendationSong
 import com.myplayer.app.ui.common.AlbumArtImage
-import androidx.compose.ui.res.painterResource
-import com.myplayer.app.R
-import com.myplayer.app.ui.theme.*
+import com.myplayer.app.ui.opentune.OpenTuneDaylistHeroCard
+import com.myplayer.app.ui.opentune.OpenTuneMadeForYouMixesShelf
+import com.myplayer.app.ui.opentune.OpenTuneQuickPicksSection
+import com.myplayer.app.ui.opentune.OpenTuneRadioDialog
+import com.myplayer.app.ui.opentune.OpenTuneRecentsBottomSheet
+import com.myplayer.app.ui.opentune.OpenTuneRecognizeDialog
+import com.myplayer.app.ui.opentune.OpenTuneSpeedDialFullDialog
+import com.myplayer.app.ui.opentune.OpenTuneSpeedDialItem
+import com.myplayer.app.ui.opentune.OpenTuneSpeedDialSection
+import com.myplayer.app.ui.opentune.OpenTuneUiPrefs
+import com.myplayer.app.ui.theme.CardBorderOlive
+import com.myplayer.app.ui.theme.NeonLimePrimary
+import com.myplayer.app.ui.theme.SurfaceContainerHigh
+import com.myplayer.app.ui.theme.ThemeState
+import com.myplayer.app.ui.theme.bouncyPopClick
+import com.myplayer.app.ui.theme.carouselSlidePop
+import com.myplayer.app.ui.theme.slidePopIn
 
 @Composable
 fun HomeScreen(
@@ -41,15 +128,21 @@ fun HomeScreen(
     bottomPadding: Dp = 100.dp,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        OpenTuneUiPrefs.load(context)
+    }
+
     val recentSongs by viewModel.recentSongs.collectAsStateWithLifecycle()
-    val mostPlayed  by viewModel.mostPlayed.collectAsStateWithLifecycle()
+    val mostPlayed by viewModel.mostPlayed.collectAsStateWithLifecycle()
     val favoriteSongs by viewModel.favoriteSongs.collectAsStateWithLifecycle()
-    val allSongs    by viewModel.allSongs.collectAsStateWithLifecycle()
+    val allSongs by viewModel.allSongs.collectAsStateWithLifecycle()
     val currentSong by viewModel.currentSong.collectAsStateWithLifecycle()
-    val userName    by viewModel.userName.collectAsStateWithLifecycle()
+    val userName by viewModel.userName.collectAsStateWithLifecycle()
     val recommendations by viewModel.recommendations.collectAsStateWithLifecycle()
-    val userState by viewModel.userState.collectAsStateWithLifecycle()
+    val hotlistSongs by viewModel.hotlistSongs.collectAsStateWithLifecycle()
     val isLoadingRecommendations by viewModel.isLoadingRecommendations.collectAsStateWithLifecycle()
+
     val popularPool = remember(mostPlayed, recentSongs, allSongs) {
         (mostPlayed.ifEmpty { recentSongs.ifEmpty { allSongs } }).take(8)
     }
@@ -58,6 +151,13 @@ fun HomeScreen(
     val selectedLanguages by viewModel.selectedLanguages.collectAsStateWithLifecycle()
     val selectedGenres by viewModel.selectedGenres.collectAsStateWithLifecycle()
     val selectedArtists by viewModel.selectedArtists.collectAsStateWithLifecycle()
+
+    var showEditNameDialog by remember { mutableStateOf(false) }
+    var nameInput by remember { mutableStateOf("") }
+    var showSpeedDialAll by remember { mutableStateOf(false) }
+    var showRecentsSheet by remember { mutableStateOf(false) }
+    var showRecognizeDialog by remember { mutableStateOf(false) }
+    var showRadioDialog by remember { mutableStateOf(false) }
 
     if (showTasteOnboarding) {
         TasteOnboardingDialog(
@@ -71,25 +171,114 @@ fun HomeScreen(
         )
     }
 
-    var showEditNameDialog by remember { mutableStateOf(false) }
-    var nameInput by remember { mutableStateOf("") }
-
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
-    androidx.activity.compose.BackHandler(enabled = selectedCategory != "All") {
+    BackHandler(enabled = selectedCategory != "All") {
         viewModel.selectCategory("All")
     }
     val displayedDownloadedSongs by viewModel.displayedDownloadedSongs.collectAsStateWithLifecycle()
     val categories = remember {
-        listOf("All", "Deep Focus", "Acoustic Chill", "Late Night", "Discoveries", "Party", "Blues", "Sad", "Hip Hop", "Chill", "Workout", "Pop")
+        listOf(
+            "All",
+            "Energize",
+            "Relax",
+            "Workout",
+            "Focus",
+            "Party",
+            "Romance",
+            "Sad",
+            "Sleep",
+            "Deep Focus",
+            "Acoustic Chill",
+            "Late Night",
+            "Discoveries",
+            "Hip Hop",
+            "Chill",
+            "Pop"
+        )
     }
 
     val greeting = remember {
         when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
-            in 5..11  -> "Good Morning!"
-            in 12..16 -> "Good Afternoon!"
-            in 17..20 -> "Good Evening!"
-            else      -> "Good Night!"
+            in 5..11 -> "Good morning"
+            in 12..16 -> "Good afternoon"
+            in 17..20 -> "Good evening"
+            else -> "Late night"
         }
+    }
+
+    // Build unified OpenTune Speed Dial items from local favorites, mostPlayed, recents & AI recommendations
+    val speedDialItems = remember(mostPlayed, favoriteSongs, recentSongs, recommendations) {
+        val localCombined = (mostPlayed + favoriteSongs + recentSongs).distinctBy { it.id }
+        val localDial = localCombined.mapIndexed { idx, song ->
+            OpenTuneSpeedDialItem(
+                id = "local_${song.id}",
+                title = song.title,
+                subtitle = song.artist,
+                thumbnailUrl = song.albumArt,
+                onPlay = {
+                    viewModel.playSong(localCombined, idx)
+                    onNavigateToNowPlaying()
+                }
+            )
+        }
+        val onlineDial = recommendations.mapIndexed { idx, reco ->
+            OpenTuneSpeedDialItem(
+                id = "reco_${reco.videoId}",
+                title = reco.title,
+                subtitle = reco.artist,
+                thumbnailUrl = reco.thumbnailUrl,
+                onPlay = {
+                    viewModel.playRecommendedSongs(recommendations, idx)
+                    onNavigateToNowPlaying()
+                }
+            )
+        }
+        (localDial + onlineDial).distinctBy { "${it.title.lowercase()}_${it.subtitle.lowercase()}" }.take(27)
+    }
+
+    if (showSpeedDialAll) {
+        OpenTuneSpeedDialFullDialog(
+            items = speedDialItems,
+            onDismiss = { showSpeedDialAll = false }
+        )
+    }
+
+    if (showRecentsSheet) {
+        val recentsPool = remember(recentSongs, mostPlayed, allSongs) {
+            (recentSongs + mostPlayed + allSongs).distinctBy { it.id }
+        }
+        OpenTuneRecentsBottomSheet(
+            recentSongs = recentsPool,
+            onPlaySongAt = { idx ->
+                viewModel.playSong(recentsPool, idx)
+                onNavigateToNowPlaying()
+            },
+            onDismiss = { showRecentsSheet = false }
+        )
+    }
+
+    if (showRecognizeDialog) {
+        OpenTuneRecognizeDialog(
+            shazamRecognizer = viewModel.shazamRecognizer,
+            onPlayMatchedSong = { title, artist, coverUrl ->
+                viewModel.playRecognizedSong(title, artist, coverUrl) {
+                    onNavigateToNowPlaying()
+                }
+            },
+            onDismiss = { showRecognizeDialog = false }
+        )
+    }
+
+    if (showRadioDialog) {
+        OpenTuneRadioDialog(
+            liveRadioRepository = viewModel.liveRadioRepository,
+            onPlayStation = { station ->
+                viewModel.playRadioStation(station)
+                showRadioDialog = false
+                onNavigateToNowPlaying()
+            },
+            onDismiss = { showRadioDialog = false }
+        )
     }
 
     if (showEditNameDialog) {
@@ -157,101 +346,197 @@ fun HomeScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding(),
-        contentPadding = PaddingValues(bottom = bottomPadding + 24.dp)
+        contentPadding = PaddingValues(bottom = bottomPadding + 28.dp)
     ) {
-        // ── Top Header Bar (Stitch Screen 7) ──────────────────────────────────
-        item {
+        // ── OpenTune + MyPlayer Merged Greeting & Top Action Bar ─────────────
+        item(key = "home_top_header") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            nameInput = userName
+                            showEditNameDialog = true
+                        },
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Image(
                         painter = painterResource(R.drawable.inside_logo),
                         contentDescription = null,
-                        modifier = Modifier.size(38.dp)
+                        modifier = Modifier.size(42.dp)
                     )
                     Column {
                         Text(
-                            text = "MYPLAYER",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
-                            ),
-                            color = MaterialTheme.colorScheme.secondary,
-                            fontSize = 10.sp
+                            text = greeting,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "Home",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
+                            text = userName.ifBlank { "MyPlayer" },
+                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
-                        .clickable { ThemeState.toggle() },
-                    contentAlignment = Alignment.Center
+                // Right Action Glass Buttons: Shazam Recognize | Live Radio | Theme | Settings
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = if (ThemeState.isDarkMode) Icons.Filled.LightMode else Icons.Filled.DarkMode,
-                        contentDescription = if (ThemeState.isDarkMode) "Switch to Day Mode" else "Switch to Night Mode",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    // 1. Shazam Recognize ("What's this song?")
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
+                            .clickable { showRecognizeDialog = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.GraphicEq,
+                            contentDescription = "Recognize song nearby",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // 2. Live Radio (50,000+ stations)
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
+                            .clickable { showRadioDialog = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Radio,
+                            contentDescription = "Live Radio",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // 3. Day / Night Theme Switcher
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
+                            .clickable { ThemeState.toggle() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (ThemeState.isDarkMode) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+                            contentDescription = "Switch Theme",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+
+                    // 4. Account & Settings Avatar Button
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
+                            .clickable(onClick = onNavigateToSettings),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Person,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
 
-        // ── Welcome & Greeting (Stitch Screen 7) ──────────────────────────────
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(
-                    modifier = Modifier
-                        .clickable {
-                            nameInput = userName
-                            showEditNameDialog = true
+        // ── OpenTune Streak & Quick Stats Pill Row ───────────────────────────
+        if (OpenTuneUiPrefs.showStreakPill) {
+            item(key = "home_streak_row") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 4.dp)
+                ) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.LocalFireDepartment,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF97316),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Daily Listening Streak Active",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
-                        .padding(vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "WELCOME BACK",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontSize = 11.sp
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = "$greeting${if (userName.isNotBlank()) ", $userName" else ""}",
-                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    }
+                    if (selectedArtists.isNotEmpty()) {
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.clickable { viewModel.openTasteSelector() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.MusicNote,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Text(
+                                        text = "${selectedArtists.size} Artists in AI Taste",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // ── Category Filter Pills ─────────────────────────────────────────────
-        item {
+        // ── Category & Mood Filter Pills ─────────────────────────────────────
+        item(key = "home_category_pills") {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -295,11 +580,13 @@ fun HomeScreen(
                             .clip(RoundedCornerShape(24.dp))
                             .background(pillBg)
                             .then(
-                                if (!isSelected) Modifier.border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(24.dp))
-                                else Modifier
+                                if (!isSelected) Modifier.border(
+                                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    RoundedCornerShape(24.dp)
+                                ) else Modifier
                             )
                             .clickable { viewModel.selectCategory(category) }
-                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                            .padding(horizontal = 18.dp, vertical = 9.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -311,17 +598,73 @@ fun HomeScreen(
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
         }
 
         if (selectedCategory == "All") {
-            // ── Stitch Screen 7: Jump Back In (Horizontal Scroll Section) ────────
+            // ── 1. OpenTune Speed Dial (3x3 Paged Square Grid) ───────────────
+            if (OpenTuneUiPrefs.showSpeedDialOnHome && speedDialItems.isNotEmpty()) {
+                item(key = "opentune_speed_dial") {
+                    OpenTuneSpeedDialSection(
+                        items = speedDialItems,
+                        userName = userName,
+                        onOpenAll = { showSpeedDialAll = true }
+                    )
+                }
+            }
+
+            // ── 2. OpenTune Daylist Hero Banner ──────────────────────────────
+            if (OpenTuneUiPrefs.showDaylistOnHome && recommendations.isNotEmpty()) {
+                item(key = "opentune_daylist_hero") {
+                    OpenTuneDaylistHeroCard(
+                        songs = recommendations,
+                        onPlayMix = {
+                            viewModel.playRecommendedSongs(recommendations, 0)
+                            onNavigateToNowPlaying()
+                        }
+                    )
+                }
+            }
+
+            // ── 3. OpenTune Quick Picks (4-Row Horizontal Pager) ─────────────
+            if (OpenTuneUiPrefs.showQuickPicksOnHome && recommendations.isNotEmpty()) {
+                item(key = "opentune_quick_picks") {
+                    OpenTuneQuickPicksSection(
+                        songs = recommendations,
+                        currentPlayingId = currentSong?.videoId ?: currentSong?.id,
+                        onPlaySongAt = { index ->
+                            viewModel.playRecommendedSongs(recommendations, index)
+                            onNavigateToNowPlaying()
+                        },
+                        onOpenRecents = { showRecentsSheet = true },
+                        onPlayAll = {
+                            viewModel.playRecommendedSongs(recommendations, 0)
+                            onNavigateToNowPlaying()
+                        }
+                    )
+                }
+            }
+
+            // ── 4. OpenTune "Made For You Today" Mixes Shelf ─────────────────
+            if (OpenTuneUiPrefs.showMixesOnHome && (recommendations.isNotEmpty() || hotlistSongs.isNotEmpty())) {
+                item(key = "opentune_made_for_you_mixes") {
+                    OpenTuneMadeForYouMixesShelf(
+                        recommendations = recommendations,
+                        hotlistSongs = hotlistSongs,
+                        onPlayMix = { mixSongs ->
+                            viewModel.playRecommendedSongs(mixSongs, 0)
+                            onNavigateToNowPlaying()
+                        }
+                    )
+                }
+            }
+
+            // ── 5. MyPlayer Preserved: Jump Back In (Horizontal Scroll) ──────
             if (jumpBackInSongs.isNotEmpty()) {
-                item {
+                item(key = "jump_back_in_header") {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 6.dp),
+                            .padding(horizontal = 20.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -333,11 +676,11 @@ fun HomeScreen(
                     }
                 }
 
-                item {
+                item(key = "jump_back_in_row") {
                     val jumpBackInListState = rememberLazyListState()
                     LazyRow(
                         state = jumpBackInListState,
-                        contentPadding = PaddingValues(horizontal = 24.dp),
+                        contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.padding(vertical = 8.dp)
                     ) {
@@ -353,16 +696,16 @@ fun HomeScreen(
                             )
                         }
                     }
-                    Spacer(Modifier.height(14.dp))
+                    Spacer(Modifier.height(10.dp))
                 }
             }
 
-            // ── Stitch Screen 7: Your Quick Mixes (2x2 Bento Tiles!) ────────────
-            item {
+            // ── 6. MyPlayer Preserved: Your Quick Mixes (2x2 Bento Tiles) ────
+            item(key = "quick_mix_bento_tiles") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 6.dp),
+                        .padding(horizontal = 20.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -381,10 +724,9 @@ fun HomeScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Row 1
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -410,7 +752,6 @@ fun HomeScreen(
                             }
                         )
                     }
-                    // Row 2
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -437,15 +778,15 @@ fun HomeScreen(
                         )
                     }
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(10.dp))
             }
 
-            // ── Stitch Screen 7: Recommended For You (High-Fidelity Track List) ───
-            item {
+            // ── 7. MyPlayer Preserved: Recommended For You Track List ────────
+            item(key = "recommended_for_you_header") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -472,7 +813,12 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                         modifier = Modifier.height(34.dp)
                     ) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                         Spacer(Modifier.width(4.dp))
                         Text("Play all", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
@@ -489,7 +835,7 @@ fun HomeScreen(
                         artUri = reco.thumbnailUrl,
                         durationMs = reco.durationMs,
                         isPlaying = isPlaying,
-                        modifier = Modifier.slidePopIn(index),
+                        modifier = Modifier.padding(horizontal = 12.dp).slidePopIn(index),
                         onClick = {
                             viewModel.playRecommendedSongs(recommendations, index)
                             onNavigateToNowPlaying()
@@ -506,7 +852,7 @@ fun HomeScreen(
                         artUri = s.albumArt,
                         durationMs = s.duration,
                         isPlaying = isPlaying,
-                        modifier = Modifier.slidePopIn(index),
+                        modifier = Modifier.padding(horizontal = 12.dp).slidePopIn(index),
                         onClick = {
                             viewModel.playSong(allSongs, index)
                             onNavigateToNowPlaying()
@@ -515,14 +861,12 @@ fun HomeScreen(
                 }
             }
         } else {
-            // ── Category Specific Mode (Deep Focus, Acoustic Chill, Late Night, etc.) ─
-
-            // 1. Header with back arrow to All, Category Title, and Play Mix button
+            // ── Category Specific Mode (Energize, Relax, Workout, Deep Focus, etc.) ─
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 6.dp),
+                        .padding(horizontal = 20.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -564,21 +908,30 @@ fun HomeScreen(
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                             modifier = Modifier.height(34.dp)
                         ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
                             Spacer(Modifier.width(4.dp))
-                            Text("Play Mix", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimary)
+                            Text(
+                                "Play Mix",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
                         }
                     }
                 }
             }
 
-            // 1b. Downloaded in Category (if any)
             if (displayedDownloadedSongs.isNotEmpty()) {
                 item {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 4.dp),
+                            .padding(horizontal = 20.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -594,14 +947,11 @@ fun HomeScreen(
                         )
                     }
                 }
-            }
-
-            if (displayedDownloadedSongs.isNotEmpty()) {
                 item {
                     val downloadedState = rememberLazyListState()
                     LazyRow(
                         state = downloadedState,
-                        contentPadding = PaddingValues(horizontal = 24.dp),
+                        contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.padding(vertical = 10.dp)
                     ) {
@@ -624,7 +974,7 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 8.dp)
+                            .padding(horizontal = 20.dp, vertical = 8.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surface)
                             .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(16.dp))
@@ -656,7 +1006,6 @@ fun HomeScreen(
                 }
             }
 
-            // 2. Loading State or Recommendations for Category
             if (recommendations.isEmpty() && isLoadingRecommendations) {
                 item {
                     Box(
@@ -685,7 +1034,7 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -708,7 +1057,7 @@ fun HomeScreen(
                 val catRecoState = rememberLazyListState()
                 LazyRow(
                     state = catRecoState,
-                    contentPadding = PaddingValues(horizontal = 24.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     if (recommendations.isNotEmpty()) {
@@ -732,13 +1081,12 @@ fun HomeScreen(
                 Spacer(Modifier.height(16.dp))
             }
 
-            // 3. All Category Recommendations List (Minimum 30 songs)
             if (recommendations.isNotEmpty()) {
                 item {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 8.dp),
+                            .padding(horizontal = 20.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -767,14 +1115,11 @@ fun HomeScreen(
             }
         }
 
-        // ── Empty State ───────────────────────────────────────────────────────
         if (allSongs.isEmpty() && recentSongs.isEmpty() && recommendations.isEmpty()) {
             item { DarkEmptyState() }
         }
     }
 }
-
-// ─── Recommended Song Card (Trending / Radio discoveries) ───────────────────
 
 @Composable
 private fun RecommendationPlaceholderCard() {
@@ -961,8 +1306,6 @@ private fun DarkRecommendationListItem(
     }
 }
 
-// ─── Popular Song Card (Dark Olive with square album art) ────────────────────
-
 @Composable
 private fun PopularSongCard(
     song: SongEntity,
@@ -1040,144 +1383,6 @@ private fun PopularSongCard(
     }
 }
 
-// ─── Favorite Song Card (2-Col Grid) ─────────────────────────────────────────
-
-@Composable
-private fun FavoriteSongCard(
-    song: SongEntity,
-    isPlaying: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(
-                BorderStroke(
-                    1.dp,
-                    if (isPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant
-                ),
-                RoundedCornerShape(18.dp)
-            )
-            .bouncyPopClick(onClick = onClick)
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerLow),
-            contentAlignment = Alignment.Center
-        ) {
-            AlbumArtImage(
-                uri = song.albumArt,
-                title = song.title,
-                artist = song.artist,
-                size = 42.dp,
-                shape = RoundedCornerShape(10.dp),
-                iconSize = 20.dp
-            )
-        }
-
-        Spacer(Modifier.width(10.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = song.title,
-                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-// ─── Dark Song List Item ─────────────────────────────────────────────────────
-
-@Composable
-private fun DarkSongListItem(
-    index: Int = 0,
-    song: SongEntity,
-    isPlaying: Boolean,
-    onClick: () -> Unit
-) {
-    val durSec = (song.duration / 1000).coerceAtLeast(0L)
-    val durText = if (durSec > 0) " • %d:%02d".format(durSec / 60, durSec % 60) else ""
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .slidePopIn(index)
-            .padding(horizontal = 20.dp, vertical = 3.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (isPlaying) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-            .bouncyPopClick(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier.width(34.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            if (isPlaying) {
-                Icon(
-                    Icons.Filled.Equalizer,
-                    contentDescription = "Playing",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-            } else {
-                Text(
-                    text = "%02d".format(index + 1),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = song.title,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = "${song.artist}$durText",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Icon(
-            Icons.Filled.MoreHoriz,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.size(20.dp)
-        )
-    }
-}
-
-// ─── Empty State ─────────────────────────────────────────────────────────────
-
 @Composable
 private fun DarkEmptyState() {
     Column(
@@ -1236,7 +1441,7 @@ fun AnimatedEqualizerBars(
         animationSpec = infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "b3"
     )
 
-    androidx.compose.foundation.Canvas(modifier = modifier) {
+    Canvas(modifier = modifier) {
         val barWidth = size.width / 5f
         val maxH = size.height
         val heights = floatArrayOf(bar1, bar2, bar3)
@@ -1245,16 +1450,14 @@ fun AnimatedEqualizerBars(
             val x = i * (barWidth * 1.8f) + barWidth / 2f
             drawLine(
                 color = color,
-                start = androidx.compose.ui.geometry.Offset(x, maxH - (maxH - h) / 2f),
-                end = androidx.compose.ui.geometry.Offset(x, (maxH - h) / 2f),
+                start = Offset(x, maxH - (maxH - h) / 2f),
+                end = Offset(x, (maxH - h) / 2f),
                 strokeWidth = barWidth,
-                cap = androidx.compose.ui.graphics.StrokeCap.Round
+                cap = StrokeCap.Round
             )
         }
     }
 }
-
-// ── Stitch Screen 7 Composables ──────────────────────────────────────────────
 
 @Composable
 private fun JumpBackInCard(
@@ -1285,7 +1488,6 @@ private fun JumpBackInCard(
                 iconSize = 52.dp
             )
 
-            // Play button overlay in center
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -1302,7 +1504,6 @@ private fun JumpBackInCard(
                 )
             }
 
-            // Top-left "Recent" badge with pulsating green dot
             Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -1349,7 +1550,7 @@ private fun JumpBackInCard(
 
 @Composable
 private fun QuickMixBentoTile(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier,
@@ -1462,7 +1663,6 @@ private fun StitchTrackRow(
                 iconSize = 22.dp
             )
 
-            // Animated Sound Wave Pill Overlay when playing
             if (isPlaying) {
                 Box(
                     modifier = Modifier
@@ -1532,6 +1732,3 @@ private fun StitchTrackRow(
         }
     }
 }
-
-
-

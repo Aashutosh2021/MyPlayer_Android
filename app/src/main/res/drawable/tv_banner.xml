@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <!-- Deep Purple-to-Magenta MyPlayer TV Gradient Background -->
+    <path android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="320"
+                android:endY="180"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF1E1035" />
+                <item android:offset="0.55" android:color="#FF5D218E" />
+                <item android:offset="1.0" android:color="#FFA70F7B" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Glowing Play Emblem Circle -->
+    <path
+        android:fillColor="#33FFFFFF"
+        android:pathData="M95,90m-42,0a42,42 0,1 1,84 0a42,42 0,1 1,-84 0" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M83,68L83,112L118,90Z" />
+    <!-- Stylised Soundbars on Right -->
+    <path
+        android:fillColor="#FF00E676"
+        android:pathData="M160,74h10v32h-10zM178,58h10v64h-10zM196,68h10v44h-10zM214,50h10v80h-10zM232,66h10v48h-10zM250,78h10v24h-10z" />
+</vector>

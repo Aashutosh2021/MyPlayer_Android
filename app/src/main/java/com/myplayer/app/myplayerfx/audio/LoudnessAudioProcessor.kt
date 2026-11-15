@@ -35,7 +35,7 @@ class LoudnessAudioProcessor(private val service: AudioFxService) : AudioProcess
     private var inputEnded = false
 
     private var amount = 0f
-    private var envelope = 0f
+    private var envelope = 0.25f
     private var gain = 1f
     private var limiterGain = 1f
     private var attack = 0f
@@ -75,9 +75,11 @@ class LoudnessAudioProcessor(private val service: AudioFxService) : AudioProcess
         val compression = params.compression.coerceIn(0f, 1f)
         val threshold = -10f - 24f * compression
         val slope = 1f - 1f / (1f + 3f * compression)
-        // makeup brings back half of what a full-scale signal would lose, so it sounds louder, not flatter
-        val makeup = -threshold * slope * 0.5f * (if (compression > 0f) 1f else 0f)
-        val boost = params.boostDb.coerceIn(0f, 12f)
+        // Gate makeup gain when signal envelope is very quiet (< -32 dBFS) so intros and fade-outs
+        // are never artificially boosted by the compressor!
+        val envGate = ((envelope - 0.025f) / 0.12f).coerceIn(0f, 1f)
+        val makeup = (-threshold * slope * 0.4f * (if (compression > 0f) envGate else 0f)).coerceIn(0f, 6f)
+        val boost = (params.boostDb.coerceIn(0f, 12f)) * (0.35f + 0.65f * envGate)
         val toggleStep = 1f / (sampleRate * ToggleSeconds)
 
         val frames = bytes / (2 * channels)
@@ -160,9 +162,10 @@ class LoudnessAudioProcessor(private val service: AudioFxService) : AudioProcess
         }
         val params = service.loudness
         amount = if (params.enabled) 1f else 0f
-        envelope = 0f
+        // Start at nominal musical RMS (0.25f) rather than 0f so quiet intros aren't over-boosted
+        envelope = 0.25f
         limiterGain = 1f
-        gain = 10f.pow(params.boostDb.coerceIn(0f, 12f) / 20f)
+        gain = 10f.pow((params.boostDb.coerceIn(0f, 12f) * 0.5f) / 20f)
     }
 
     override fun reset() {

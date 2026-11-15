@@ -25,12 +25,13 @@ class MediaItemFactory @Inject constructor() {
             Uri.parse(path)
         }
 
+        val isRadioStream = songId.startsWith("radio:")
         val cleanCacheKey = songId
             .removePrefix("online://")
             .removePrefix("spotify:track:")
             .removePrefix("spotify:")
             .trim()
-            .takeIf { it.isNotBlank() }
+            .takeIf { it.isNotBlank() && !isRadioStream }
 
         val resolvedArtUri = when {
             !albumArt.isNullOrBlank() && albumArt.startsWith("/") -> Uri.fromFile(File(albumArt))

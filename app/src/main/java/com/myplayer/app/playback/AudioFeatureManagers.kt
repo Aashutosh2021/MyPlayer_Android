@@ -6,29 +6,31 @@ import android.content.Intent
 import android.media.audiofx.AudioEffect
 import android.net.Uri
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.annotation.OptIn
-import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.*
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
 import java.io.File
 import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 
 @OptIn(UnstableApi::class)
 @Singleton
@@ -37,8 +39,9 @@ class AudioFeatureManagers @Inject constructor(
     private val okHttpClient: OkHttpClient
 ) {
     private var crossfadeJob: Job? = null
-    private var tailFadeJob: Job? = null
-    private var tailPlayer: ExoPlayer? = null
+    private var rampInJob: Job? = null
+    private var attachedPlayer: ExoPlayer? = null
+    private var transitionListener: Player.Listener? = null
 
     /**
      * 1. SYSTEM AUDIO EFFECTS (Let Dolby / equalizer apps process MyPlayer audio)
@@ -58,43 +61,15 @@ class AudioFeatureManagers @Inject constructor(
         context.sendBroadcast(intent)
     }
 
-    private fun getOrCreateTailPlayer(dataSourceFactory: DataSource.Factory?): ExoPlayer? {
-        tailPlayer?.let { return it }
-        return runCatching {
-            val dsFactory = dataSourceFactory ?: DefaultDataSource.Factory(context)
-            val audioAttrs = AudioAttributes.Builder()
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                .setUsage(C.USAGE_MEDIA)
-                .build()
-            ExoPlayer.Builder(context)
-                .setAudioAttributes(audioAttrs, false)
-                .setMediaSourceFactory(DefaultMediaSourceFactory(dsFactory))
-                .build().apply {
-                    volume = 0f
-                    playWhenReady = false
-                    tailPlayer = this
-                }
-        }.getOrNull()
-    }
-
-    private fun stopTailPlayer() {
-        tailFadeJob?.cancel()
-        tailFadeJob = null
-        runCatching {
-            tailPlayer?.pause()
-            tailPlayer?.volume = 0f
-            tailPlayer?.clearMediaItems()
-        }
-    }
-
     /**
-     * 2. APPLE MUSIC STYLE DUAL-PLAYER EQUAL-POWER S-CURVE CROSSFADE ENGINE (Android)
-     * - Works seamlessly across BOTH local multi-item queues AND online 1-item queues!
-     * - Uses an auxiliary [tailPlayer] (fed from SimpleCache / local disk) to keep the outgoing
-     *   track's tail playing and fading out via cos(t * PI/2) while [exoPlayer] immediately
-     *   starts the incoming track and fades it in via sin(t * PI/2)!
-     * - If the outgoing stream is uncached, gracefully falls back to single-player S-curve
-     *   cosine fade-out + sine fade-in with online stream readiness detection.
+     * 2. PERCEPTUAL SMOOTH FADE-OUT & FADE-IN ENGINE (Zero-Spike Sequential Envelope)
+     * - Keeps the song at normal 1.0f volume throughout playback.
+     * - During the last [fadeSec] seconds of the outgoing song, monotonically eases volume down
+     *   from 1.0f to 0.0f on the main [exoPlayer] using a perceptual smoothstep curve
+     *   (no un-equalized second player, no double-audio summing spike, no early track cut).
+     * - On track transition (`onMediaItemTransition`), immediately locks [exoPlayer.volume] at 0.0f
+     *   before the first audio frame plays, waits until the new track is actually playing and
+     *   advancing, and then monotonically ramps volume from 0.0f up to 1.0f over [fadeSec] seconds.
      */
     fun attachCrossfadeMonitor(
         scope: CoroutineScope,
@@ -109,25 +84,174 @@ class AudioFeatureManagers @Inject constructor(
         onTriggerNextTrack: (() -> Unit)? = null
     ) {
         crossfadeJob?.cancel()
-        crossfadeJob = scope.launch(Dispatchers.Main) {
-            var lastPrewarmedMediaId: String? = null
-            var lastTriggeredMediaId: String? = null
-            var isRampingInNewTrack = false
+        rampInJob?.cancel()
+        transitionListener?.let { oldListener ->
+            runCatching { attachedPlayer?.removeListener(oldListener) }
+        }
+        attachedPlayer = exoPlayer
 
-            while (isActive) {
-                delay(75L)
-                val xfadeActive = isEnabled() || MyPlayerAudioFxDspBridge.crossfadeEnabled
-                if (!xfadeActive) {
-                    if (exoPlayer.volume < 1f) exoPlayer.volume = 1f
-                    stopTailPlayer()
+        var isRampingInNewTrack = false
+        var fadingOutMediaId: String? = null
+        var lastFadeOutVol = 1.0f
+
+        fun isCrossfadeActive(): Boolean {
+            return (isEnabled() || MyPlayerAudioFxDspBridge.crossfadeEnabled) &&
+                exoPlayer.repeatMode != Player.REPEAT_MODE_ONE
+        }
+
+        fun resolveFadeWindowMs(trackDurationMs: Long = C.TIME_UNSET): Long {
+            val fadeSec = crossfadeSecondsProvider().coerceIn(1f, 12f)
+            val requestedMs = (fadeSec * 1000f).toLong().coerceIn(1500L, 12_000L)
+            return if (trackDurationMs > 12_000L) {
+                requestedMs.coerceAtMost((trackDurationMs / 3L).coerceAtLeast(1500L))
+            } else {
+                requestedMs
+            }
+        }
+
+        fun startSmoothFadeInForNewTrack(targetMediaId: String) {
+            rampInJob?.cancel()
+            if (!isCrossfadeActive()) {
+                isRampingInNewTrack = false
+                exoPlayer.volume = 1.0f
+                return
+            }
+
+            // Lock volume at 0.0f immediately before the first sample of the incoming track is heard
+            isRampingInNewTrack = true
+            fadingOutMediaId = null
+            lastFadeOutVol = 1.0f
+            exoPlayer.volume = 0.0f
+
+            rampInJob = scope.launch(Dispatchers.Main.immediate) {
+                try {
+                    // 1. Wait while the incoming track resolves/buffers until sound actually starts advancing
+                    var waitElapsedMs = 0L
+                    var initialPos = -1L
+                    while (isActive && waitElapsedMs < 8_000L) {
+                        if (!isCrossfadeActive()) {
+                            exoPlayer.volume = 1.0f
+                            isRampingInNewTrack = false
+                            return@launch
+                        }
+                        // Keep locked at 0.0f while waiting for playback to begin
+                        if (exoPlayer.volume > 0.01f) {
+                            exoPlayer.volume = 0.0f
+                        }
+                        if (exoPlayer.playbackState == Player.STATE_READY && exoPlayer.isPlaying) {
+                            val pos = exoPlayer.currentPosition
+                            if (initialPos < 0L) {
+                                initialPos = pos
+                            } else if (pos > initialPos || pos > 40L) {
+                                break
+                            }
+                        }
+                        delay(25L)
+                        waitElapsedMs += 25L
+                    }
+
+                    // 2. Smoothly ramp volume from 0.0f ("niche se") up to 1.0f ("normal sound")
+                    val dur = exoPlayer.duration.takeIf { it > 0L } ?: C.TIME_UNSET
+                    val fadeInMs = resolveFadeWindowMs(dur)
+                    var accumulatedPlayMs = 0L
+                    var lastTickMs = SystemClock.elapsedRealtime()
+                    var currentRampVol = 0.0f
+
+                    while (isActive && accumulatedPlayMs < fadeInMs) {
+                        if (!isCrossfadeActive()) {
+                            exoPlayer.volume = 1.0f
+                            isRampingInNewTrack = false
+                            return@launch
+                        }
+                        // Stop ramp-in early if the track already entered its own fade-out window
+                        val trackDur = exoPlayer.duration
+                        val trackPos = exoPlayer.currentPosition
+                        if (trackDur > 12_000L && (trackDur - trackPos) in 1..resolveFadeWindowMs(trackDur)) {
+                            break
+                        }
+
+                        val nowMs = SystemClock.elapsedRealtime()
+                        val deltaMs = (nowMs - lastTickMs).coerceIn(0L, 120L)
+                        lastTickMs = nowMs
+
+                        if (exoPlayer.isPlaying && exoPlayer.playbackState == Player.STATE_READY) {
+                            accumulatedPlayMs += deltaMs
+                            val p = (accumulatedPlayMs.toFloat() / fadeInMs.toFloat()).coerceIn(0f, 1f)
+                            // Perceptual smoothstep * p curve: starts very gently from 0 with zero sudden jump
+                            val smooth = p * p * (3f - 2f * p)
+                            val targetInVol = (smooth * p).coerceIn(0f, 1f)
+                            if (targetInVol > currentRampVol) {
+                                currentRampVol = targetInVol
+                            }
+                            exoPlayer.volume = currentRampVol
+                        }
+                        delay(30L)
+                    }
+
+                    exoPlayer.volume = 1.0f
+                } finally {
                     isRampingInNewTrack = false
+                }
+            }
+        }
+
+        val listener = object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val newId = mediaItem?.mediaId ?: ""
+                if (isCrossfadeActive() && newId.isNotBlank()) {
+                    startSmoothFadeInForNewTrack(newId)
+                } else {
+                    rampInJob?.cancel()
+                    isRampingInNewTrack = false
+                    fadingOutMediaId = null
+                    lastFadeOutVol = 1.0f
+                    exoPlayer.volume = 1.0f
+                }
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                // If user manually seeks back into the middle of the current track, restore normal volume
+                if (reason == Player.DISCONTINUITY_REASON_SEEK &&
+                    oldPosition.mediaItemIndex == newPosition.mediaItemIndex
+                ) {
+                    val dur = exoPlayer.duration
+                    val fadeWin = resolveFadeWindowMs(dur)
+                    if (dur > 0L && (dur - newPosition.positionMs) > fadeWin) {
+                        rampInJob?.cancel()
+                        isRampingInNewTrack = false
+                        fadingOutMediaId = null
+                        lastFadeOutVol = 1.0f
+                        exoPlayer.volume = 1.0f
+                    }
+                }
+            }
+        }
+        transitionListener = listener
+        exoPlayer.addListener(listener)
+
+        crossfadeJob = scope.launch(Dispatchers.Main) {
+            while (isActive) {
+                delay(35L)
+
+                if (!isCrossfadeActive()) {
+                    if (!isRampingInNewTrack && exoPlayer.volume < 1f) {
+                        exoPlayer.volume = 1f
+                    }
+                    fadingOutMediaId = null
+                    lastFadeOutVol = 1.0f
                     continue
                 }
 
-                if (!exoPlayer.isPlaying || exoPlayer.repeatMode == Player.REPEAT_MODE_ONE) {
-                    if (!exoPlayer.playWhenReady && !isRampingInNewTrack) {
-                        stopTailPlayer()
-                    }
+                // While ramping in the new song, let rampInJob own exoPlayer.volume exclusively
+                if (isRampingInNewTrack) {
+                    continue
+                }
+
+                if (!exoPlayer.isPlaying || exoPlayer.playbackState != Player.STATE_READY) {
                     continue
                 }
 
@@ -136,130 +260,38 @@ class AudioFeatureManagers @Inject constructor(
                 val currentItem = exoPlayer.currentMediaItem
                 val currentMediaId = currentItem?.mediaId ?: ""
 
-                if (duration > 10_000L && position > 1500L && currentItem != null) {
-                    val fadeSec = crossfadeSecondsProvider().coerceIn(1f, 12f)
-                    val fadeWindowMs = (fadeSec * 1000f).toLong().coerceIn(1000L, (duration / 2).coerceAtLeast(1500L))
+                if (duration > 12_000L && position > 1_000L && currentItem != null) {
+                    val fadeOutWindowMs = resolveFadeWindowMs(duration)
                     val remainingMs = duration - position
 
-                    // Pre-warm tailPlayer ~2.5s before the crossfade window so overlapping handoff is 0ms instant
-                    if (remainingMs in (fadeWindowMs + 1)..(fadeWindowMs + 2800L) && lastPrewarmedMediaId != currentMediaId) {
-                        lastPrewarmedMediaId = currentMediaId
-                        runCatching {
-                            val tp = getOrCreateTailPlayer(dataSourceFactory)
-                            if (tp != null) {
-                                tp.pause()
-                                tp.volume = 0f
-                                tp.setMediaItem(currentItem, (duration - fadeWindowMs).coerceAtLeast(0L))
-                                tp.prepare()
-                            }
+                    if (remainingMs in 1..fadeOutWindowMs) {
+                        if (fadingOutMediaId != currentMediaId) {
+                            fadingOutMediaId = currentMediaId
+                            lastFadeOutVol = exoPlayer.volume.coerceIn(0f, 1f)
                         }
-                    }
 
-                    if (remainingMs in 1..fadeWindowMs) {
-                        val tp = tailPlayer
-                        val canOverlapWithTail = tp != null &&
-                            tp.currentMediaItem?.mediaId == currentMediaId &&
-                            tp.playbackState == Player.STATE_READY
+                        // Perceptual smooth fade-out: stays at 1.0 entering the window, then eases down to 0.0
+                        val linearRem = (remainingMs.toFloat() / fadeOutWindowMs.toFloat()).coerceIn(0f, 1f)
+                        val smooth = linearRem * linearRem * (3f - 2f * linearRem)
+                        val targetOutVol = if (remainingMs <= 120L) {
+                            0.0f
+                        } else {
+                            (smooth * linearRem).coerceIn(0f, 1f)
+                        }
 
-                        if (canOverlapWithTail && lastTriggeredMediaId != currentMediaId && remainingMs >= 800L) {
-                            // TRUE DUAL-PLAYER OVERLAPPING CROSSFADE:
-                            // 1. Sync tailPlayer to exoPlayer's exact position and start tail playback at current volume
-                            lastTriggeredMediaId = currentMediaId
-                            isRampingInNewTrack = true
-                            val overlapMs = remainingMs.coerceIn(1000L, fadeWindowMs)
-
-                            runCatching {
-                                tp!!.seekTo(exoPlayer.currentPosition)
-                                tp.volume = exoPlayer.volume.coerceIn(0.2f, 1.0f)
-                                tp.play()
-                            }
-                            delay(45L)
-
-                            // 2. Fade out tailPlayer smoothly in background using Equal-Power Cosine curve
-                            tailFadeJob?.cancel()
-                            tailFadeJob = scope.launch(Dispatchers.Main) {
-                                val steps = 30
-                                val stepDelay = (overlapMs / steps).coerceAtLeast(30L)
-                                val startVol = tp?.volume ?: 1f
-                                for (s in 1..steps) {
-                                    if (!isActive) break
-                                    val p = s.toFloat() / steps.toFloat()
-                                    val env = (startVol * cos(p * (PI / 2.0)).toFloat()).coerceIn(0f, 1f)
-                                    runCatching { tp?.volume = env }
-                                    delay(stepDelay)
-                                }
-                                stopTailPlayer()
-                            }
-
-                            // 3. Trigger next track immediately on main exoPlayer at low volume and ramp in via Sine curve
-                            exoPlayer.volume = 0.04f
-                            if (exoPlayer.mediaItemCount > 1 && exoPlayer.hasNextMediaItem()) {
-                                exoPlayer.seekToNextMediaItem()
-                            } else if (onTriggerNextTrack != null) {
-                                onTriggerNextTrack.invoke()
-                            }
-
-                            var waitedMs = 0L
-                            while (isActive && waitedMs < 3500L) {
-                                val newId = exoPlayer.currentMediaItem?.mediaId ?: ""
-                                if (newId != currentMediaId && exoPlayer.isPlaying) break
-                                delay(60L)
-                                waitedMs += 60L
-                            }
-
-                            val rampInSteps = 28
-                            val stepDelayMs = (overlapMs / rampInSteps).coerceIn(35L, 180L)
-                            for (step in 1..rampInSteps) {
-                                if (!isActive) break
-                                val inProgress = step.toFloat() / rampInSteps.toFloat()
-                                val equalPowerIn = sin(inProgress * (PI / 2.0)).toFloat().coerceIn(0.04f, 1.0f)
-                                exoPlayer.volume = equalPowerIn
-                                delay(stepDelayMs)
-                            }
+                        // Strict monotonic decrease so position jitter can NEVER cause a volume spike
+                        val appliedVol = minOf(lastFadeOutVol, targetOutVol)
+                        lastFadeOutVol = appliedVol
+                        exoPlayer.volume = appliedVol
+                    } else if (remainingMs > fadeOutWindowMs + 400L) {
+                        fadingOutMediaId = null
+                        lastFadeOutVol = 1.0f
+                        if (exoPlayer.volume < 1.0f) {
                             exoPlayer.volume = 1.0f
-                            isRampingInNewTrack = false
-                        } else if (!isRampingInNewTrack) {
-                            // Single-player Equal-Power Cosine Fade-Out fallback
-                            val progress = (1f - (remainingMs.toFloat() / fadeWindowMs.toFloat())).coerceIn(0f, 1f)
-                            val equalPowerOut = cos(progress * (PI / 2.0)).toFloat().coerceIn(0.04f, 1.0f)
-                            exoPlayer.volume = equalPowerOut
-
-                            // Trigger at 900ms remaining (before STATE_ENDED can fire prematurely)
-                            if (remainingMs <= 900L && lastTriggeredMediaId != currentMediaId) {
-                                lastTriggeredMediaId = currentMediaId
-                                isRampingInNewTrack = true
-
-                                exoPlayer.volume = 0.04f
-                                if (exoPlayer.mediaItemCount > 1 && exoPlayer.hasNextMediaItem()) {
-                                    exoPlayer.seekToNextMediaItem()
-                                } else if (onTriggerNextTrack != null) {
-                                    onTriggerNextTrack.invoke()
-                                }
-
-                                var waitedMs = 0L
-                                while (isActive && waitedMs < 3500L) {
-                                    val newId = exoPlayer.currentMediaItem?.mediaId ?: ""
-                                    if (newId != currentMediaId && exoPlayer.isPlaying) break
-                                    delay(60L)
-                                    waitedMs += 60L
-                                }
-
-                                val rampInSteps = 24
-                                val stepDelayMs = (fadeWindowMs / (rampInSteps * 2)).coerceIn(40L, 150L)
-                                for (step in 1..rampInSteps) {
-                                    if (!isActive) break
-                                    val inProgress = step.toFloat() / rampInSteps.toFloat()
-                                    val equalPowerIn = sin(inProgress * (PI / 2.0)).toFloat().coerceIn(0.04f, 1.0f)
-                                    exoPlayer.volume = equalPowerIn
-                                    delay(stepDelayMs)
-                                }
-                                exoPlayer.volume = 1.0f
-                                isRampingInNewTrack = false
-                            }
                         }
-                    } else if (!isRampingInNewTrack && exoPlayer.volume < 1f && remainingMs > fadeWindowMs) {
-                        exoPlayer.volume = 1f
                     }
+                } else if (exoPlayer.volume < 1.0f && fadingOutMediaId == null) {
+                    exoPlayer.volume = 1.0f
                 }
             }
         }
@@ -311,13 +343,14 @@ class AudioFeatureManagers @Inject constructor(
     }
 
     fun release() {
-        tailFadeJob?.cancel()
-        tailFadeJob = null
+        rampInJob?.cancel()
+        rampInJob = null
         crossfadeJob?.cancel()
         crossfadeJob = null
-        runCatching {
-            tailPlayer?.release()
+        transitionListener?.let { oldListener ->
+            runCatching { attachedPlayer?.removeListener(oldListener) }
         }
-        tailPlayer = null
+        transitionListener = null
+        attachedPlayer = null
     }
 }

@@ -1,6 +1,5 @@
 package com.myplayer.app.playback
 
-import android.net.Uri
 import android.util.Base64
 import android.util.Log
 import androidx.media3.exoplayer.ExoPlayer
@@ -22,7 +21,6 @@ import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.abs
 
 enum class UpgradeAlignment { BLEND, SHORT_FADE, SEEK }
 
@@ -34,9 +32,9 @@ data class UpgradedStreamInfo(
 )
 
 /**
- * OpenTune Mid-Stream Upgrade Handoff + JioSaavn 320kbps Direct Decryption Engine for MyPlayer.
- * Starts playback fast on YouTube/NewPipe streams, resolves 320kbps AAC in the background,
- * and performs a sample-aligned hot-swap at the exact playback position when higher bitrate is verified.
+ * OpenTune Stream Metadata & JioSaavn 320kbps Resolver for MyPlayer.
+ * Resolves high-bitrate metadata in the background without interrupting active playback
+ * or causing mid-intro volume jumps/cuts during the first 10 seconds of a track.
  */
 @Singleton
 class UpgradeHandoffManager @Inject constructor(
@@ -71,32 +69,9 @@ class UpgradeHandoffManager @Inject constructor(
     ) {
         activeUpgradeJob?.cancel()
         _upgradedBadge.value = null
-
-        activeUpgradeJob = scope.launch(Dispatchers.IO) {
-            delay(800L)
-            val cleanTitle = losslessStreamResolver.cleanTrackTitle(title).ifBlank { title }
-            val candidate = resolveJioSaavn320(cleanTitle, artist, durationMs) ?: return@launch
-
-            withContext(Dispatchers.Main) {
-                if (!player.isPlaying) return@withContext
-                val currentPos = player.currentPosition
-                val currentMediaItem = player.currentMediaItem ?: return@withContext
-
-                Log.d(TAG, "Hot-swapping $title ($videoId) to ${candidate.codecLabel} at ${currentPos}ms")
-                val upgradedItem = currentMediaItem.buildUpon()
-                    .setUri(Uri.parse(candidate.streamUrl))
-                    .build()
-
-                val originalVolume = player.volume
-                player.volume = (originalVolume * 0.35f).coerceAtLeast(0.05f)
-                player.setMediaItem(upgradedItem, currentPos)
-                player.prepare()
-                player.play()
-                delay(90L)
-                player.volume = originalVolume
-                _upgradedBadge.value = candidate
-            }
-        }
+        // NOTE: Do NOT call player.setMediaItem() or mutate player.volume mid-playback!
+        // Replacing the MediaItem 2–8 seconds into a newly started track flushed the DSP chain,
+        // interrupted the crossfade fade-in envelope, and caused a loud volume jump in the first 10s.
     }
 
     suspend fun resolveJioSaavn320(

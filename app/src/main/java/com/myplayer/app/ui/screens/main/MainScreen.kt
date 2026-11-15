@@ -33,7 +33,10 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import com.myplayer.app.ui.components.WhatsNewDialog
 import com.myplayer.app.ui.components.WhatsNewRepository
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.myplayer.app.ui.components.FloatingNavBar
+import com.myplayer.app.ui.components.MorphingBottomChrome
+import com.myplayer.app.ui.components.rememberChromeScroll
 import com.myplayer.app.ui.navigation.Screen
 import com.myplayer.app.ui.screens.downloads.DownloadsScreen
 import com.myplayer.app.ui.screens.home.HomeScreen
@@ -224,57 +227,58 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
     // Content draws behind the transparent miniplayer + navbar; screens get the bar height as list padding.
     val density = androidx.compose.ui.platform.LocalDensity.current
     var barHeight by remember { mutableStateOf(0.dp) }
+    val chromeScroll = rememberChromeScroll()
+
+    // Expand the dock automatically whenever the user switches top-level tabs
+    LaunchedEffect(currentRoute) {
+        chromeScroll.expand()
+    }
+
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .nestedScroll(chromeScroll),
         containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             if (showNav) {
-                Column(
+                val miniSong = currentSong?.let {
+                    if (it.albumArt.isNullOrBlank() && !displayArt.isNullOrBlank()) {
+                        it.copy(albumArt = displayArt)
+                    } else {
+                        it
+                    }
+                } ?: remember(currentOnlineSong, displayArt) {
+                    com.myplayer.app.data.local.entity.SongEntity(
+                        id = currentOnlineSong?.videoId ?: "",
+                        title = displayTitle ?: "",
+                        artist = displayArtist ?: "",
+                        album = "",
+                        duration = 0,
+                        path = displayArt ?: "",
+                        albumArt = displayArt,
+                        dateAdded = 0
+                    )
+                }
+
+                MorphingBottomChrome(
+                    collapsed = chromeScroll.collapsed,
+                    currentRoute = currentRoute,
+                    onNavigate = navigateToBottomTab,
+                    onExpand = { chromeScroll.expand() },
+                    hasMiniPlayer = hasAnySong,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .onGloballyPositioned { barHeight = with(density) { it.size.height.toDp() } }
-                        .background(androidx.compose.ui.graphics.Color.Transparent),
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    // Mini player above nav bar
-                    AnimatedVisibility(
-                        visible = hasAnySong,
-                        enter = slideInVertically(
-                            initialOffsetY = { it },
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioLowBouncy,
-                                stiffness = Spring.StiffnessMediumLow
-                            )
-                        ) + scaleIn(initialScale = 0.88f) + fadeIn(),
-                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-                    ) {
-                        // Memoize synthetic SongEntity: only rebuild when the online song reference
-                        // changes, not on every isPlaying / any-state recomposition.
-                        val miniSong = currentSong?.let {
-                            if (it.albumArt.isNullOrBlank() && !displayArt.isNullOrBlank()) {
-                                it.copy(albumArt = displayArt)
-                            } else {
-                                it
-                            }
-                        } ?: remember(currentOnlineSong, displayArt) {
-                            com.myplayer.app.data.local.entity.SongEntity(
-                                id = currentOnlineSong?.videoId ?: "",
-                                title = displayTitle ?: "",
-                                artist = displayArtist ?: "",
-                                album = "",
-                                duration = 0,
-                                path = displayArt ?: "",
-                                albumArt = displayArt,
-                                dateAdded = 0
-                            )
-                        }
+                        .onGloballyPositioned { barHeight = with(density) { it.size.height.toDp() } },
+                    miniPlayerContent = { collapseProgress, miniModifier ->
                         MiniPlayer(
                             song = miniSong,
                             isPlaying = isPlaying,
                             onPlayPauseClick = remember(viewModel) { { viewModel.playPause() } },
                             onNextClick = remember(viewModel) { { viewModel.skipToNext() } },
                             onPreviousClick = remember(viewModel) { { viewModel.skipToPrevious() } },
+                            collapseProgress = collapseProgress,
+                            modifier = miniModifier,
                             mainViewModel = viewModel,
                             onPlayerClick = remember(navController) {
                                 {
@@ -283,12 +287,7 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                             }
                         )
                     }
-
-                    FloatingNavBar(
-                        currentRoute = currentRoute,
-                        onNavigate = navigateToBottomTab
-                    )
-                }
+                )
             }
         }
     ) { innerPadding ->
@@ -357,6 +356,12 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                 com.myplayer.app.ui.screens.trending.TrendingScreen(
                     onNavigateToNowPlaying = {
                         navController.navigate(Screen.NowPlaying.route) { launchSingleTop = true }
+                    },
+                    onNavigateToSyncPlay = {
+                        navController.navigate(Screen.SyncPlay.route) { launchSingleTop = true }
+                    },
+                    onNavigateToDualBud = {
+                        navController.navigate(Screen.DualBud.route) { launchSingleTop = true }
                     },
                     bottomPadding = barHeight,
                     viewModel = homeViewModel
@@ -545,5 +550,3 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
         }
     }
 }
-
-

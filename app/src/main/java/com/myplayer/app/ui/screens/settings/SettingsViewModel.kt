@@ -6,21 +6,30 @@ import java.net.UnknownHostException
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.myplayer.app.cast.LocalCastManager
 import com.myplayer.app.data.backup.BackupRestoreManager
 import com.myplayer.app.data.local.datastore.SettingsDataStore
+import com.myplayer.app.data.local.entity.SongEntity
 import com.myplayer.app.data.local.prefs.PreferencesManager
-import com.myplayer.app.data.update.NoInternetException
-import com.myplayer.app.data.update.UpdateChecker
-import com.myplayer.app.data.update.UpdateInfo
 import com.myplayer.app.data.preferences.AudioPlaybackConfig
 import com.myplayer.app.data.preferences.AudioSettingsRepository
 import com.myplayer.app.data.preferences.ClarityPreset
 import com.myplayer.app.data.preferences.StreamQuality
+import com.myplayer.app.data.radio.LiveRadioRepository
+import com.myplayer.app.data.recognize.ShazamRecognizer
+import com.myplayer.app.data.repository.DownloadRepository
+import com.myplayer.app.data.sponsorblock.SponsorBlockManager
+import com.myplayer.app.data.update.NoInternetException
+import com.myplayer.app.data.update.UpdateChecker
+import com.myplayer.app.data.update.UpdateInfo
+import com.myplayer.app.playback.MusicController
+import com.myplayer.app.playback.dsp.AutoEqManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -49,6 +58,7 @@ class SettingsViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val settingsDataStore: SettingsDataStore,
     private val musicRepository: com.myplayer.app.data.repository.MusicRepository,
+    private val downloadRepository: DownloadRepository,
     private val preferencesManager: PreferencesManager,
     private val backupRestoreManager: BackupRestoreManager,
     private val updateChecker: UpdateChecker,
@@ -56,11 +66,45 @@ class SettingsViewModel @Inject constructor(
     val youtubeManager: com.myplayer.app.data.youtube.YouTubeIntegrationManager,
     private val audioSettingsRepository: AudioSettingsRepository,
     val audioPlaybackStore: com.myplayer.app.data.preferences.AudioPlaybackStore,
-    val audioFeatureManagers: com.myplayer.app.playback.AudioFeatureManagers
+    val audioFeatureManagers: com.myplayer.app.playback.AudioFeatureManagers,
+    val autoEqManager: AutoEqManager,
+    val sponsorBlockManager: SponsorBlockManager,
+    val localCastManager: LocalCastManager,
+    val liveRadioRepository: LiveRadioRepository,
+    val shazamRecognizer: ShazamRecognizer,
+    val musicController: MusicController
 ) : ViewModel() {
 
     val audioConfig = audioSettingsRepository.configFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AudioPlaybackConfig())
+
+    val mostPlayed: StateFlow<List<SongEntity>> = musicRepository.getMostPlayedSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val favoriteSongs: StateFlow<List<SongEntity>> = musicRepository.getFavoriteSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val downloadedSongs: StateFlow<List<SongEntity>> = downloadRepository.getAllDownloads()
+        .map { list ->
+            list.map { d ->
+                SongEntity(
+                    id = d.id,
+                    title = d.title,
+                    artist = d.artist,
+                    album = d.album.ifBlank { "Downloaded" },
+                    duration = d.durationMs,
+                    path = d.localPath,
+                    albumArt = d.thumbnailUrl,
+                    dateAdded = d.downloadedAt,
+                    videoId = d.id
+                )
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun playSong(song: SongEntity) {
+        musicController.playSongs(listOf(song), 0)
+    }
 
     val isSpotifyLoggedIn = spotifyManager.isLoggedIn
     val spotifyUsername = spotifyManager.username
@@ -75,6 +119,10 @@ class SettingsViewModel @Inject constructor(
 
     fun clearSpotifySyncMessage() {
         _spotifySyncMessage.value = null
+    }
+
+    fun showStatusMessage(msg: String) {
+        _spotifySyncMessage.value = msg
     }
 
     fun syncSpotify() {

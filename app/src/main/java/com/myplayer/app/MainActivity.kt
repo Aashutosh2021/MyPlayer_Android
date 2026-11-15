@@ -40,6 +40,8 @@ import com.myplayer.app.data.update.UpdateInfo
 import com.myplayer.app.data.update.UpdateNotifier
 import com.myplayer.app.ui.components.WhatsNewDialog
 import com.myplayer.app.ui.components.WhatsNewRepository
+import com.myplayer.app.tv.TvMainScreen
+import com.myplayer.app.tv.isTelevisionDevice
 import com.myplayer.app.ui.screens.main.MainScreen
 import com.myplayer.app.ui.theme.MyPlayerTheme
 import com.myplayer.app.ui.theme.ThemeState
@@ -114,7 +116,11 @@ class MainActivity : ComponentActivity() {
             }
 
             MyPlayerTheme(darkTheme = ThemeState.isDarkMode) {
-                MainScreen()
+                if (isTelevisionDevice(this@MainActivity)) {
+                    TvMainScreen()
+                } else {
+                    MainScreen()
+                }
 
                 launchUpdateAvailable?.let { update ->
                     AlertDialog(
