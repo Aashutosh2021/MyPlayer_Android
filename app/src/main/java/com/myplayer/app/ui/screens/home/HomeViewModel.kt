@@ -9,8 +9,6 @@ import com.myplayer.app.data.local.datastore.SettingsDataStore
 import com.myplayer.app.data.local.entity.SongEntity
 import com.myplayer.app.data.online.InnertubeApi
 import com.myplayer.app.data.online.model.OnlineSong
-import com.myplayer.app.data.radio.LiveRadioRepository
-import com.myplayer.app.data.radio.LiveRadioStation
 import com.myplayer.app.data.recognize.ShazamRecognizer
 import com.myplayer.app.data.recommendation.RecommendationCoordinator
 import com.myplayer.app.data.recommendation.ai.OnDeviceMusicAiModel
@@ -51,7 +49,6 @@ class HomeViewModel @Inject constructor(
     private val aiModel: OnDeviceMusicAiModel,
     val spotifyManager: com.myplayer.app.data.spotify.SpotifyIntegrationManager,
     val youtubeManager: com.myplayer.app.data.youtube.YouTubeIntegrationManager,
-    val liveRadioRepository: LiveRadioRepository,
     val shazamRecognizer: ShazamRecognizer
 ) : ViewModel() {
 
@@ -484,23 +481,6 @@ class HomeViewModel @Inject constructor(
 
     fun playRecommendedSong(song: RecommendationSong) {
         playRecommendedSongs(listOf(song), 0)
-    }
-
-    /** Plays a Live Radio station from OpenTune's 50,000+ Radio Browser directory. */
-    fun playRadioStation(station: LiveRadioStation) {
-        val onlineRadio = OnlineSong(
-            videoId = "radio:${station.uuid}",
-            title = station.name,
-            artist = listOf(station.state, station.country)
-                .filter { it.isNotBlank() }
-                .joinToString(", ")
-                .ifBlank { "Live Radio" },
-            thumbnailUrl = station.faviconUrl ?: "",
-            durationMs = 0L,
-            durationText = "LIVE",
-            streamUrl = station.streamUrl
-        )
-        musicController.playOnlineSong(onlineRadio)
     }
 
     /** Searches YouTube Music for a Shazam-recognized track and starts playback immediately. */

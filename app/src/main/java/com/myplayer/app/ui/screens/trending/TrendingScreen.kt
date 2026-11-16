@@ -41,7 +41,6 @@ import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -74,8 +73,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.myplayer.app.R
 import com.myplayer.app.data.recommendation.model.RecommendationSong
 import com.myplayer.app.ui.common.AlbumArtImage
-import com.myplayer.app.ui.opentune.OpenTuneRadioContent
-import com.myplayer.app.ui.opentune.OpenTuneRadioDialog
 import com.myplayer.app.ui.opentune.OpenTuneRecognizeDialog
 import com.myplayer.app.ui.screens.home.HomeViewModel
 import com.myplayer.app.ui.screens.home.TasteOnboardingDialog
@@ -144,7 +141,6 @@ fun TrendingScreen(
     var selectedFilter by rememberSaveable { mutableStateOf("For you") }
     var selectedArtistFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var showRecognizeDialog by remember { mutableStateOf(false) }
-    var showRadioDialog by remember { mutableStateOf(false) }
 
     if (showTasteOnboarding) {
         TasteOnboardingDialog(
@@ -167,18 +163,6 @@ fun TrendingScreen(
                 }
             },
             onDismiss = { showRecognizeDialog = false }
-        )
-    }
-
-    if (showRadioDialog) {
-        OpenTuneRadioDialog(
-            liveRadioRepository = viewModel.liveRadioRepository,
-            onPlayStation = { station ->
-                viewModel.playRadioStation(station)
-                showRadioDialog = false
-                onNavigateToNowPlaying()
-            },
-            onDismiss = { showRadioDialog = false }
         )
     }
 
@@ -295,7 +279,7 @@ fun TrendingScreen(
         }
     }
 
-    val filterTabs = listOf("For you", "Moods & genres", "Hotlist Charts", "New releases", "Live Radio")
+    val filterTabs = listOf("For you", "Moods & genres", "Hotlist Charts", "New releases")
 
     Column(
         modifier = Modifier
@@ -386,7 +370,7 @@ fun TrendingScreen(
             }
         }
 
-        // ── Filter Pills Row (For you | Moods & genres | Hotlist Charts | New releases | Live Radio) ──
+        // ── Filter Pills Row (For you | Moods & genres | Hotlist Charts | New releases) ──
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -424,19 +408,6 @@ fun TrendingScreen(
         }
 
         when {
-            selectedFilter == "Live Radio" -> {
-                // Inline OpenTune 50,000+ Live Radio Station Browser
-                OpenTuneRadioContent(
-                    liveRadioRepository = viewModel.liveRadioRepository,
-                    onPlayStation = { station ->
-                        viewModel.playRadioStation(station)
-                        onNavigateToNowPlaying()
-                    },
-                    showTopBar = false,
-                    bottomPadding = bottomPadding
-                )
-            }
-
             selectedFilter == "Hotlist Charts" -> {
                 // Preserved MyPlayer World Trending Hotlist Hero + Ranked #01-#50 List
                 if (isLoading && recommendations.isEmpty()) {
@@ -626,30 +597,17 @@ fun TrendingScreen(
                     verticalItemSpacing = 10.dp,
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    // 1. Quick Feature Hub Cards (Recognize | Live Radio | Together | DualBud)
+                    // 1. Quick Feature Hub Cards (Recognize | Together | DualBud)
                     item(span = StaggeredGridItemSpan.FullLine, key = "quick_feature_hub") {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
+                            ExploreFeatureActionCard(
+                                icon = Icons.Filled.GraphicEq,
+                                title = "Recognize",
+                                subtitle = "Identify any song",
+                                accent = Color(0xFF8B5CF6),
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                ExploreFeatureActionCard(
-                                    icon = Icons.Filled.GraphicEq,
-                                    title = "Recognize",
-                                    subtitle = "Identify any song",
-                                    accent = Color(0xFF8B5CF6),
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { showRecognizeDialog = true }
-                                )
-                                ExploreFeatureActionCard(
-                                    icon = Icons.Filled.Radio,
-                                    title = "Live Radio",
-                                    subtitle = "50,000+ stations",
-                                    accent = Color(0xFF10B981),
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { showRadioDialog = true }
-                                )
-                            }
+                                onClick = { showRecognizeDialog = true }
+                            )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest 
+    
     xmlns:android="http://schemas.android.com/apk/res/android"
+    
     xmlns:tools="http://schemas.android.com/tools">
     <!-- Network access for online search and streaming -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -15,7 +17,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Phone-Mic Active Noise Cancellation (ANC) & Transparency Mode -->
+    <!-- Microphone permission for song recognition -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Local audio file access across Android versions -->
@@ -28,13 +30,11 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"
         tools:ignore="ScopedStorage" />
-
     <!-- Permission to bind to AriaService. Restricted to same-certificate applications -->
     <permission
         android:name="com.myplayer.app.permission.ARIA_CONNECT"
         android:protectionLevel="normal" />
     <uses-permission android:name="com.myplayer.app.permission.ARIA_CONNECT" />
-
     <!-- Android TV / Google TV / Fire TV Support (optional so mobile devices stay compatible) -->
     <uses-feature
         android:name="android.software.leanback"
@@ -45,7 +45,6 @@
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
-
     <application
         android:name=".MyPlayerApplication"
         android:allowBackup="true"
@@ -112,7 +111,6 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
-
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

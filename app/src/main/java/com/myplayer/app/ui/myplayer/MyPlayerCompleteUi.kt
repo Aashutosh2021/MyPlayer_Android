@@ -20966,11 +20966,6 @@ fun MyPlayerAudioFxScreen(
             }
         }
 
-        // ── CARD 0C: PHONE-MIC ACTIVE NOISE CANCELLATION (ANC) ──────────────
-        item {
-            MyPlayerAncSettingsCard()
-        }
-
         // ── CARD 1: REVERB (Exact match to screenshot) ───────────────────────
 
 

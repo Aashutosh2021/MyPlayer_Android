@@ -391,6 +391,8 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     onOpenCustomizeStyles = { showStylePicker = true },
                     onOpenAudioLab = { navController.navigate(Screen.MyPlayerAudioLab.route) { launchSingleTop = true } },
                     onOpenAppearance = { navController.navigate(Screen.MyPlayerAppearance.route) { launchSingleTop = true } },
+                    onNavigateToSyncPlay = { navController.navigate(Screen.SyncPlay.route) { launchSingleTop = true } },
+                    onNavigateToDualBud = { navController.navigate(Screen.DualBud.route) { launchSingleTop = true } },
                     bottomPadding = barHeight
                 )
             }

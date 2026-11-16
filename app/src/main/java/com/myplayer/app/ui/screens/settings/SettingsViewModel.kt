@@ -15,7 +15,6 @@ import com.myplayer.app.data.preferences.AudioPlaybackConfig
 import com.myplayer.app.data.preferences.AudioSettingsRepository
 import com.myplayer.app.data.preferences.ClarityPreset
 import com.myplayer.app.data.preferences.StreamQuality
-import com.myplayer.app.data.radio.LiveRadioRepository
 import com.myplayer.app.data.recognize.ShazamRecognizer
 import com.myplayer.app.data.repository.DownloadRepository
 import com.myplayer.app.data.sponsorblock.SponsorBlockManager
@@ -70,7 +69,6 @@ class SettingsViewModel @Inject constructor(
     val autoEqManager: AutoEqManager,
     val sponsorBlockManager: SponsorBlockManager,
     val localCastManager: LocalCastManager,
-    val liveRadioRepository: LiveRadioRepository,
     val shazamRecognizer: ShazamRecognizer,
     val musicController: MusicController
 ) : ViewModel() {

@@ -78,7 +78,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.PlayCircleFilled
 import androidx.compose.material.icons.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SettingsBackupRestore
@@ -134,7 +133,6 @@ import com.myplayer.app.BuildConfig
 import com.myplayer.app.data.update.UpdateChecker
 import com.myplayer.app.ui.components.WhatsNewDialog
 import com.myplayer.app.ui.myplayer.MyPlayerAccentGreen
-import com.myplayer.app.ui.myplayer.MyPlayerAncSettingsCard
 import com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge
 import com.myplayer.app.ui.myplayer.MyPlayerFunnyVibeCheckSettingsCard
 import com.myplayer.app.ui.myplayer.MyPlayerInteractiveFeatureTour
@@ -146,7 +144,6 @@ import com.myplayer.app.ui.opentune.OpenTuneGroupCard
 import com.myplayer.app.ui.opentune.OpenTuneGroupLabel
 import com.myplayer.app.ui.opentune.OpenTuneNavRow
 import com.myplayer.app.ui.opentune.OpenTunePillSegmented
-import com.myplayer.app.ui.opentune.OpenTuneRadioDialog
 import com.myplayer.app.ui.opentune.OpenTuneRecognizeDialog
 import com.myplayer.app.ui.opentune.OpenTuneReplayDialog
 import com.myplayer.app.ui.opentune.OpenTuneRowDivider
@@ -183,13 +180,13 @@ private val SETTINGS_CATEGORY_LIST = listOf(
     SettingsCategoryMeta(
         key = "history",
         title = "Listening history & Replay",
-        summary = "Replay stats, Wrapped milestones, Live Radio and Shazam song recognition",
+        summary = "Replay stats, Wrapped milestones and Shazam song recognition",
         icon = Icons.Filled.History
     ),
     SettingsCategoryMeta(
         key = "audio",
         title = "Sound and quality",
-        summary = "Streaming quality, 15-band EQ, AutoEq (8,000+ headphones), Audio FX Lab & ANC",
+        summary = "Streaming quality, 15-band EQ, AutoEq (8,000+ headphones) & Audio FX Lab",
         icon = Icons.Filled.GraphicEq
     ),
     SettingsCategoryMeta(
@@ -321,7 +318,6 @@ fun SettingsScreen(
     var showSponsorBlockDialog by remember { mutableStateOf(false) }
     var showCastDialog by remember { mutableStateOf(false) }
     var showReplayDialog by remember { mutableStateOf(false) }
-    var showRadioDialog by remember { mutableStateOf(false) }
     var showRecognizeDialog by remember { mutableStateOf(false) }
 
     BackHandler(enabled = openCategoryKey != null) {
@@ -409,29 +405,6 @@ fun SettingsScreen(
             downloadedSongs = downloadedSongs,
             onPlaySong = { viewModel.playSong(it) },
             onDismiss = { showReplayDialog = false }
-        )
-    }
-
-    if (showRadioDialog) {
-        OpenTuneRadioDialog(
-            liveRadioRepository = viewModel.liveRadioRepository,
-            onPlayStation = { station ->
-                viewModel.musicController.playOnlineSong(
-                    com.myplayer.app.data.online.model.OnlineSong(
-                        videoId = "radio:${station.uuid}",
-                        title = station.name,
-                        artist = listOf(station.state, station.country)
-                            .filter { it.isNotBlank() }
-                            .joinToString(", ")
-                            .ifBlank { "Live Radio" },
-                        thumbnailUrl = station.faviconUrl ?: "",
-                        durationMs = 0L,
-                        durationText = "LIVE",
-                        streamUrl = station.streamUrl
-                    )
-                )
-            },
-            onDismiss = { showRadioDialog = false }
         )
     }
 
@@ -1168,21 +1141,6 @@ fun SettingsScreen(
                 )
             }
         ),
-        SearchableSettingEntry(
-            categoryKey = "history",
-            categoryTitle = "Listening history & Replay",
-            groupTitle = "Discovery tools",
-            title = "Live Radio Directory (50,000+ Stations)",
-            summary = "Browse and stream live radio stations from around the world",
-            render = {
-                OpenTuneNavRow(
-                    title = "Live Radio (50,000+ Stations)",
-                    summary = "Stream live stations near you, by country or genre",
-                    icon = Icons.Filled.Radio,
-                    onClick = { showRadioDialog = true }
-                )
-            }
-        ),
 
         // 3. Sound and quality
         SearchableSettingEntry(
@@ -1907,29 +1865,12 @@ fun SettingsScreen(
                     }
                 }
 
-                // Preserve Phone-Mic ANC & Desi Mood Vibe-Check cards inside Sound/Audio & Motion pages!
-                if (categoryPage.key == "audio") {
-                    item(key = "anc_vibe_label") {
-                        OpenTuneGroupLabel(text = "Active Noise Cancellation & Vibe Lab")
-                    }
-                    item(key = "anc_vibe_cards") {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            MyPlayerAncSettingsCard()
-                            if (myplayerState != null) {
-                                MyPlayerFunnyVibeCheckSettingsCard(myplayerState = myplayerState)
-                            }
-                        }
-                    }
-                } else if (categoryPage.key == "motion" && myplayerState != null) {
-                    item(key = "vibe_card_motion") {
+                // Preserve Desi Mood Vibe-Check card inside Sound/Audio & Motion pages!
+                if ((categoryPage.key == "audio" || categoryPage.key == "motion") && myplayerState != null) {
+                    item(key = "vibe_card_section") {
                         OpenTuneGroupLabel(text = "Desi Mood Vibe-Check")
                     }
-                    item(key = "vibe_card_motion_body") {
+                    item(key = "vibe_card_section_body") {
                         Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                             MyPlayerFunnyVibeCheckSettingsCard(myplayerState = myplayerState)
                         }
@@ -2239,19 +2180,13 @@ fun SettingsScreen(
                         }
                     }
 
-                    // Quick Access Phone-Mic ANC & Desi Mood Vibe-Check cards at bottom of Root Settings
-                    item(key = "quick_lab_label") {
-                        OpenTuneGroupLabel(text = "Quick Audio & Mood Lab")
-                    }
-                    item(key = "quick_lab_cards") {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            MyPlayerAncSettingsCard()
-                            if (myplayerState != null) {
+                    // Quick Access Desi Mood Vibe-Check card at bottom of Root Settings
+                    if (myplayerState != null) {
+                        item(key = "quick_lab_label") {
+                            OpenTuneGroupLabel(text = "Quick Mood Lab")
+                        }
+                        item(key = "quick_lab_cards") {
+                            Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                                 MyPlayerFunnyVibeCheckSettingsCard(myplayerState = myplayerState)
                             }
                         }

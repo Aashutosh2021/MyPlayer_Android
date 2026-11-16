@@ -2,8 +2,12 @@ package com.myplayer.app.ui.screens.library
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.myplayer.app.data.local.dao.PlayedSongHistoryDao
+import com.myplayer.app.data.local.datastore.SettingsDataStore
 import com.myplayer.app.data.local.entity.FolderEntity
+import com.myplayer.app.data.local.entity.PlayedSongHistoryEntity
 import com.myplayer.app.data.local.entity.PlaylistEntity
+import com.myplayer.app.data.local.entity.SongEntity
 import com.myplayer.app.data.online.InnertubeApi
 import com.myplayer.app.data.online.model.OnlineSong
 import com.myplayer.app.data.repository.DownloadRepository
@@ -30,6 +34,8 @@ class LibraryViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val hybridLibraryRepository: HybridLibraryRepository,
     private val downloadRepository: DownloadRepository,
+    private val playedSongHistoryDao: PlayedSongHistoryDao,
+    private val settingsDataStore: SettingsDataStore,
     private val innertubeApi: InnertubeApi,
     val spotifyManager: SpotifyIntegrationManager,
     val youtubeManager: YouTubeIntegrationManager
@@ -113,6 +119,37 @@ class LibraryViewModel @Inject constructor(
 
     val favoriteSongs: StateFlow<List<PlayableSong>> = repository.getFavoriteSongs()
         .map { list -> list.map { PlayableSong.Local(it) } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val userName: StateFlow<String> = settingsDataStore.userName
+        .map { it.ifBlank { "YOU" } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "YOU")
+
+    val recentHistory: StateFlow<List<PlayedSongHistoryEntity>> = playedSongHistoryDao.getPlayedHistory(0L)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val mostPlayedEntities: StateFlow<List<SongEntity>> = repository.getMostPlayedSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val likedSongEntities: StateFlow<List<SongEntity>> = repository.getFavoriteSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val downloadedSongEntities: StateFlow<List<SongEntity>> = downloadRepository.getAllDownloads()
+        .map { list ->
+            list.map { d ->
+                SongEntity(
+                    id = d.id,
+                    title = d.title,
+                    artist = d.artist,
+                    album = d.album.ifBlank { "Downloaded" },
+                    duration = d.durationMs,
+                    path = d.localPath,
+                    albumArt = d.thumbnailUrl,
+                    dateAdded = d.downloadedAt,
+                    videoId = d.id
+                )
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isImportingPlaylist = MutableStateFlow(false)

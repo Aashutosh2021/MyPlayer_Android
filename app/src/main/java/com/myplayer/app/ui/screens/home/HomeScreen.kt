@@ -59,7 +59,6 @@ import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -106,7 +105,6 @@ import com.myplayer.app.ui.common.AlbumArtImage
 import com.myplayer.app.ui.opentune.OpenTuneDaylistHeroCard
 import com.myplayer.app.ui.opentune.OpenTuneMadeForYouMixesShelf
 import com.myplayer.app.ui.opentune.OpenTuneQuickPicksSection
-import com.myplayer.app.ui.opentune.OpenTuneRadioDialog
 import com.myplayer.app.ui.opentune.OpenTuneRecentsBottomSheet
 import com.myplayer.app.ui.opentune.OpenTuneRecognizeDialog
 import com.myplayer.app.ui.opentune.OpenTuneSpeedDialFullDialog
@@ -157,7 +155,6 @@ fun HomeScreen(
     var showSpeedDialAll by remember { mutableStateOf(false) }
     var showRecentsSheet by remember { mutableStateOf(false) }
     var showRecognizeDialog by remember { mutableStateOf(false) }
-    var showRadioDialog by remember { mutableStateOf(false) }
 
     if (showTasteOnboarding) {
         TasteOnboardingDialog(
@@ -269,18 +266,6 @@ fun HomeScreen(
         )
     }
 
-    if (showRadioDialog) {
-        OpenTuneRadioDialog(
-            liveRadioRepository = viewModel.liveRadioRepository,
-            onPlayStation = { station ->
-                viewModel.playRadioStation(station)
-                showRadioDialog = false
-                onNavigateToNowPlaying()
-            },
-            onDismiss = { showRadioDialog = false }
-        )
-    }
-
     if (showEditNameDialog) {
         AlertDialog(
             onDismissRequest = { showEditNameDialog = false },
@@ -388,7 +373,7 @@ fun HomeScreen(
                     }
                 }
 
-                // Right Action Glass Buttons: Shazam Recognize | Live Radio | Theme | Settings
+                // Right Action Glass Buttons: Shazam Recognize | Theme | Settings
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -410,25 +395,7 @@ fun HomeScreen(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-
-                    // 2. Live Radio (50,000+ stations)
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
-                            .clickable { showRadioDialog = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Radio,
-                            contentDescription = "Live Radio",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
+                    
                     // 3. Day / Night Theme Switcher
                     Box(
                         modifier = Modifier
@@ -445,25 +412,7 @@ fun HomeScreen(
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(19.dp)
                         )
-                    }
-
-                    // 4. Account & Settings Avatar Button
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
-                            .clickable(onClick = onNavigateToSettings),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Person,
-                            contentDescription = "Settings",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                    }                    
                 }
             }
         }
@@ -499,35 +448,6 @@ fun HomeScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
-                            }
-                        }
-                    }
-                    if (selectedArtists.isNotEmpty()) {
-                        item {
-                            Surface(
-                                shape = RoundedCornerShape(18.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                modifier = Modifier.clickable { viewModel.openTasteSelector() }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.MusicNote,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Text(
-                                        text = "${selectedArtists.size} Artists in AI Taste",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
                             }
                         }
                     }
@@ -701,86 +621,6 @@ fun HomeScreen(
             }
 
             // ── 6. MyPlayer Preserved: Your Quick Mixes (2x2 Bento Tiles) ────
-            item(key = "quick_mix_bento_tiles") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Your Quick Mixes",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Updated today",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        QuickMixBentoTile(
-                            icon = Icons.Filled.GraphicEq,
-                            title = "Deep Focus",
-                            subtitle = "Drone, Lo-Fi & Ambient",
-                            modifier = Modifier.weight(1f).slidePopIn(0),
-                            onClick = { viewModel.selectCategory("Deep Focus") },
-                            onPlayClick = {
-                                viewModel.playCategory("Deep Focus") { onNavigateToNowPlaying() }
-                            }
-                        )
-                        QuickMixBentoTile(
-                            icon = Icons.Filled.MusicNote,
-                            title = "Acoustic Chill",
-                            subtitle = "Warm strings & vocals",
-                            modifier = Modifier.weight(1f).slidePopIn(1),
-                            onClick = { viewModel.selectCategory("Acoustic Chill") },
-                            onPlayClick = {
-                                viewModel.playCategory("Acoustic Chill") { onNavigateToNowPlaying() }
-                            }
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        QuickMixBentoTile(
-                            icon = Icons.Filled.Nightlight,
-                            title = "Late Night",
-                            subtitle = "Synthwave & Electro",
-                            modifier = Modifier.weight(1f).slidePopIn(2),
-                            onClick = { viewModel.selectCategory("Late Night") },
-                            onPlayClick = {
-                                viewModel.playCategory("Late Night") { onNavigateToNowPlaying() }
-                            }
-                        )
-                        QuickMixBentoTile(
-                            icon = Icons.Filled.AutoAwesome,
-                            title = "Discoveries",
-                            subtitle = "Custom picks for you",
-                            modifier = Modifier.weight(1f).slidePopIn(3),
-                            onClick = { viewModel.selectCategory("Discoveries") },
-                            onPlayClick = {
-                                viewModel.playCategory("Discoveries") { onNavigateToNowPlaying() }
-                            }
-                        )
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-            }
-
             // ── 7. MyPlayer Preserved: Recommended For You Track List ────────
             item(key = "recommended_for_you_header") {
                 Row(
@@ -1545,85 +1385,6 @@ private fun JumpBackInCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-    }
-}
-
-@Composable
-private fun QuickMixBentoTile(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-    onPlayClick: () -> Unit = onClick
-) {
-    Box(
-        modifier = modifier
-            .shadow(2.dp, RoundedCornerShape(16.dp), spotColor = Color(0x0A000000))
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .bouncyPopClick(onClick = onClick)
-            .padding(14.dp)
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .shadow(2.dp, RoundedCornerShape(10.dp), spotColor = Color(0x0C000000))
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surface),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surface)
-                        .clickable(onClick = onPlayClick),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = "Play Mix",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
     }
 }
 

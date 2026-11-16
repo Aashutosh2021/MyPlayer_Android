@@ -1,16 +1,23 @@
 package com.myplayer.app.ui.screens.library
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
@@ -22,6 +29,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -29,15 +39,27 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.myplayer.app.data.local.entity.PlayedSongHistoryEntity
 import com.myplayer.app.data.local.entity.PlaylistEntity
+import com.myplayer.app.data.local.entity.SongEntity
 import com.myplayer.app.data.repository.PlayableSong
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.painterResource
 import com.myplayer.app.R
 import com.myplayer.app.ui.common.AlbumArtImage
+import com.myplayer.app.ui.opentune.OpenTuneReplayDialog
 import com.myplayer.app.ui.theme.*
 import com.myplayer.app.ui.myplayer.*
+import java.util.Calendar
+import java.util.concurrent.TimeUnit
+
+private enum class LibrarySubPage(val title: String) {
+    LIKED("Liked"),
+    DOWNLOADS("Downloads"),
+    LOCAL("On this phone"),
+    PLAYLISTS("Playlists")
+}
 
 @Composable
 fun LibraryScreen(
@@ -48,6 +70,8 @@ fun LibraryScreen(
     onOpenCustomizeStyles: () -> Unit = {},
     onOpenAudioLab: () -> Unit = {},
     onOpenAppearance: () -> Unit = {},
+    onNavigateToSyncPlay: () -> Unit = {},
+    onNavigateToDualBud: () -> Unit = {},
     bottomPadding: Dp = 100.dp,
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
@@ -58,6 +82,12 @@ fun LibraryScreen(
     val localSongs by viewModel.localSongs.collectAsStateWithLifecycle()
     val isScanningLocal by viewModel.isScanningLocal.collectAsStateWithLifecycle()
     val favoriteSongs by viewModel.favoriteSongs.collectAsStateWithLifecycle()
+    val userName by viewModel.userName.collectAsStateWithLifecycle()
+    val recentHistory by viewModel.recentHistory.collectAsStateWithLifecycle()
+    val mostPlayedEntities by viewModel.mostPlayedEntities.collectAsStateWithLifecycle()
+    val likedSongEntities by viewModel.likedSongEntities.collectAsStateWithLifecycle()
+    val downloadedSongEntities by viewModel.downloadedSongEntities.collectAsStateWithLifecycle()
+    val isSpotifyConnected by viewModel.spotifyManager.isLoggedIn.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val localFolderLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -81,19 +111,34 @@ fun LibraryScreen(
         viewModel.rescanLocalSongs()
     }
 
-    // Persisted across navigation (NavHost's rememberSaveableStateHolder):
-    // previously a plain remember reset the section to Downloaded every time the
-    // user opened a playlist / NowPlaying screen and came back.
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var selectedSection by rememberSaveable { mutableStateOf<LibrarySubPage?>(null) }
     var sortAscending by rememberSaveable { mutableStateOf(true) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var showReplayDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
     var songToAddToPlaylist by remember { mutableStateOf<PlayableSong?>(null) }
     var songToRemoveDownload by remember { mutableStateOf<PlayableSong?>(null) }
 
+    BackHandler(enabled = selectedSection != null) {
+        selectedSection = null
+    }
+
     // Playlist rename flow (grid-level "Rename" action): target playlist + name buffer
     var playlistToRename by remember { mutableStateOf<PlaylistEntity?>(null) }
     var renameInput by remember { mutableStateOf("") }
+
+    if (showReplayDialog) {
+        OpenTuneReplayDialog(
+            mostPlayed = mostPlayedEntities,
+            favoriteSongs = likedSongEntities,
+            downloadedSongs = downloadedSongEntities,
+            onPlaySong = { entity ->
+                showReplayDialog = false
+                onPlaySong(listOf(PlayableSong.Local(entity)), 0)
+            },
+            onDismiss = { showReplayDialog = false }
+        )
+    }
 
     songToRemoveDownload?.let { song ->
         AlertDialog(
@@ -311,147 +356,40 @@ fun LibraryScreen(
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-    ) {
-        // ── Top Header Bar (Stitch Screen 8) ──────────────────────────────────
-        Row(
+    val activeSubPage = selectedSection
+    if (activeSubPage != null) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .statusBarsPadding()
         ) {
             Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Image(
-                    painter = painterResource(R.drawable.inside_logo),
-                    contentDescription = null,
-                    modifier = Modifier.size(38.dp)
-                )
-                Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { selectedSection = null }) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                     Text(
-                        text = "MYPLAYER",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        ),
-                        color = MaterialTheme.colorScheme.secondary,
-                        fontSize = 10.sp
-                    )
-                    Text(
-                        text = "Library",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
+                        text = activeSubPage.title,
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
-            }
-
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
-                            .clickable(onClick = onNavigateToSettings),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = "Settings",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            }
-
-        // ── Stitch Screen 8: Category Filter Chips ────────────────────────────
-        val categoryTabs = remember { listOf("Downloaded", "Local Files", "Playlists") }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            categoryTabs.forEachIndexed { index, title ->
-                val isSelected = selectedTab == index
-                val pillBg = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-                val textTint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(pillBg)
-                        .then(
-                            if (!isSelected) Modifier.border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(20.dp))
-                            else Modifier
-                        )
-                        .clickable { selectedTab = index }
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (title == "Downloaded") {
-                            Icon(
-                                imageVector = Icons.Filled.DownloadDone,
-                                contentDescription = null,
-                                tint = textTint,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                        }
-                        Text(
-                            text = title,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                            color = textTint
-                        )
-                    }
-                }
-            }
-        }
-
-        if (selectedTab in 0..2) {
-            // ── Stitch Screen 8: Sort & Action Row ────────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { sortAscending = !sortAscending }
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                ) {
-                    Icon(Icons.Filled.SwapVert, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = if (selectedTab == 0 || selectedTab == 1) {
-                            if (sortAscending) "Alphabetical (A–Z)" else "Alphabetical (Z–A)"
-                        } else {
-                            if (sortAscending) "Recently Added" else "Oldest First"
-                        },
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(16.dp))
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (selectedTab == 1) {
+                    if (activeSubPage == LibrarySubPage.LOCAL) {
                         OutlinedButton(
                             onClick = { localFolderLauncher.launch(null) },
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -460,7 +398,7 @@ fun LibraryScreen(
                         ) {
                             Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Select Folder", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Folder", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                         OutlinedButton(
                             onClick = {
@@ -477,77 +415,690 @@ fun LibraryScreen(
                         ) {
                             Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(if (isScanningLocal) "Scanning..." else "Scan Phone", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text(if (isScanningLocal) "Scanning" else "Scan", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
-                            .clickable { showCreatePlaylistDialog = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "New Playlist", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    IconButton(onClick = { sortAscending = !sortAscending }) {
+                        Icon(Icons.Filled.SwapVert, contentDescription = "Sort", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                    IconButton(onClick = { showCreatePlaylistDialog = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = "New Playlist", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+
+            when (activeSubPage) {
+                LibrarySubPage.LIKED -> HybridSongsTab(
+                    songs = remember(favoriteSongs, sortAscending) {
+                        if (sortAscending) favoriteSongs.sortedBy { it.title.lowercase() }
+                        else favoriteSongs.sortedByDescending { it.title.lowercase() }
+                    },
+                    onPlaySong = onPlaySong,
+                    onAddToPlaylist = { songToAddToPlaylist = it },
+                    onRemoveDownload = { songToRemoveDownload = it },
+                    onExportFile = { song, fmt -> viewModel.exportSongAsFile(song, fmt) },
+                    bottomPadding = bottomPadding
+                )
+                LibrarySubPage.DOWNLOADS -> HybridSongsTab(
+                    songs = remember(downloadedSongs, sortAscending) {
+                        if (sortAscending) downloadedSongs.sortedBy { it.title.lowercase() }
+                        else downloadedSongs.sortedByDescending { it.title.lowercase() }
+                    },
+                    onPlaySong = onPlaySong,
+                    onAddToPlaylist = { songToAddToPlaylist = it },
+                    onRemoveDownload = { songToRemoveDownload = it },
+                    onExportFile = { song, fmt -> viewModel.exportSongAsFile(song, fmt) },
+                    bottomPadding = bottomPadding
+                )
+                LibrarySubPage.LOCAL -> HybridSongsTab(
+                    songs = remember(localSongs, sortAscending) {
+                        if (sortAscending) localSongs.sortedBy { it.title.lowercase() }
+                        else localSongs.sortedByDescending { it.title.lowercase() }
+                    },
+                    onPlaySong = onPlaySong,
+                    onAddToPlaylist = { songToAddToPlaylist = it },
+                    onRemoveDownload = { songToRemoveDownload = it },
+                    onExportFile = { song, fmt -> viewModel.exportSongAsFile(song, fmt) },
+                    isLocalTab = true,
+                    onSelectLocalFolder = { localFolderLauncher.launch(null) },
+                    onScanDeviceAudio = {
+                        val perm = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            android.Manifest.permission.READ_MEDIA_AUDIO
+                        } else {
+                            android.Manifest.permission.READ_EXTERNAL_STORAGE
+                        }
+                        audioPermLauncher.launch(perm)
+                    },
+                    bottomPadding = bottomPadding
+                )
+                LibrarySubPage.PLAYLISTS -> PlaylistsTab(
+                    playlists = remember(playlists, sortAscending) {
+                        if (sortAscending) playlists.sortedByDescending { it.createdAt }
+                        else playlists.sortedBy { it.createdAt }
+                    },
+                    favoriteSongs = favoriteSongs,
+                    playlistStats = playlistStats,
+                    playlistBatchStatus = playlistBatchStatus,
+                    onTogglePlaylistDownload = viewModel::togglePlaylistDownload,
+                    onPlayFavoriteSongs = { onPlaySong(favoriteSongs, 0) },
+                    onCreatePlaylist = { showCreatePlaylistDialog = true },
+                    onDeletePlaylist = viewModel::deletePlaylist,
+                    onRenamePlaylist = { playlist ->
+                        playlistToRename = playlist
+                        renameInput = playlist.name
+                    },
+                    onPlaylistClick = onPlaylistClick,
+                    bottomPadding = bottomPadding
+                )
+            }
+        }
+        return
+    }
+
+    val badgeContainerColor = if (ThemeState.isDarkMode) Color(0xFFD6B966) else MaterialTheme.colorScheme.primaryContainer
+    val badgeIconTint = if (ThemeState.isDarkMode) Color(0xFF1F1B10) else MaterialTheme.colorScheme.onPrimaryContainer
+    val tileSurfaceColor = if (ThemeState.isDarkMode) Color(0xFF1B1A1E) else MaterialTheme.colorScheme.surfaceContainer
+
+    LazyColumn(
+        contentPadding = PaddingValues(bottom = bottomPadding + 28.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+    ) {
+        // ── OpenTune Library PageHeader ─────────────────────────────────────
+        item(key = "opentune_library_header") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Library",
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.6).sp,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Row(
+                    modifier = Modifier
+                        .height(50.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f), CircleShape)
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { showReplayDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.History,
+                            contentDescription = "Listening history & Replay",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }
         }
 
-        when (selectedTab) {
-            0 -> HybridSongsTab(
-                songs = remember(downloadedSongs, sortAscending) {
-                    if (sortAscending) downloadedSongs.sortedBy { it.title.lowercase() }
-                    else downloadedSongs.sortedByDescending { it.title.lowercase() }
-                },
-                onPlaySong = onPlaySong,
-                onAddToPlaylist = { songToAddToPlaylist = it },
-                onRemoveDownload = { songToRemoveDownload = it },
-                onExportFile = { song, fmt -> viewModel.exportSongAsFile(song, fmt) },
-                bottomPadding = bottomPadding
-            )
-            1 -> HybridSongsTab(
-                songs = remember(localSongs, sortAscending) {
-                    if (sortAscending) localSongs.sortedBy { it.title.lowercase() }
-                    else localSongs.sortedByDescending { it.title.lowercase() }
-                },
-                onPlaySong = onPlaySong,
-                onAddToPlaylist = { songToAddToPlaylist = it },
-                onRemoveDownload = { songToRemoveDownload = it },
-                onExportFile = { song, fmt -> viewModel.exportSongAsFile(song, fmt) },
-                isLocalTab = true,
-                onSelectLocalFolder = { localFolderLauncher.launch(null) },
-                onScanDeviceAudio = {
-                    val perm = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                        android.Manifest.permission.READ_MEDIA_AUDIO
-                    } else {
-                        android.Manifest.permission.READ_EXTERNAL_STORAGE
-                    }
-                    audioPermLauncher.launch(perm)
-                },
-                bottomPadding = bottomPadding
-            )
-            else -> PlaylistsTab(
-                playlists = remember(playlists, sortAscending) {
-                    if (sortAscending) playlists.sortedByDescending { it.createdAt }
-                    else playlists.sortedBy { it.createdAt }
-                },
-                favoriteSongs = favoriteSongs,
-                playlistStats = playlistStats,
-                playlistBatchStatus = playlistBatchStatus,
-                onTogglePlaylistDownload = viewModel::togglePlaylistDownload,
-                onPlayFavoriteSongs = { onPlaySong(favoriteSongs, 0) },
-                onCreatePlaylist = { showCreatePlaylistDialog = true },
-                onDeletePlaylist = viewModel::deletePlaylist,
-                onRenamePlaylist = { playlist ->
-                    playlistToRename = playlist
-                    renameInput = playlist.name
-                },
-                onPlaylistClick = onPlaylistClick,
-                bottomPadding = bottomPadding
+        // ── OpenTune "YOUR LISTENING EXPERIENCE" Horizontal Cards ───────────
+        item(key = "opentune_replay_cards") {
+            OpenTuneLibraryExperienceCards(
+                userName = userName,
+                recentHistory = recentHistory,
+                mostPlayed = mostPlayedEntities,
+                favoriteSongs = likedSongEntities,
+                onClick = { showReplayDialog = true },
+                modifier = Modifier.padding(vertical = 6.dp)
             )
         }
+
+        // ── OpenTune 2-Column Shortcut Pill Grid + Spotify Row ──────────────
+        item(key = "opentune_shortcuts_grid") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OpenTuneLibraryShortcut(
+                        icon = Icons.Filled.Favorite,
+                        title = "Liked",
+                        subtitle = "${favoriteSongs.size} songs",
+                        badgeColor = badgeContainerColor,
+                        badgeTint = badgeIconTint,
+                        cardColor = tileSurfaceColor,
+                        onClick = { selectedSection = LibrarySubPage.LIKED },
+                        modifier = Modifier.weight(1f)
+                    )
+                    OpenTuneLibraryShortcut(
+                        icon = Icons.Filled.Download,
+                        title = "Downloads",
+                        subtitle = if (downloadedSongs.isEmpty()) "Offline songs" else "${downloadedSongs.size} songs",
+                        badgeColor = badgeContainerColor,
+                        badgeTint = badgeIconTint,
+                        cardColor = tileSurfaceColor,
+                        onClick = { selectedSection = LibrarySubPage.DOWNLOADS },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OpenTuneLibraryShortcut(
+                        icon = Icons.Filled.LibraryMusic,
+                        title = "On this phone",
+                        subtitle = if (localSongs.isEmpty()) "Local files" else "${localSongs.size} files",
+                        badgeColor = badgeContainerColor,
+                        badgeTint = badgeIconTint,
+                        cardColor = tileSurfaceColor,
+                        onClick = { selectedSection = LibrarySubPage.LOCAL },
+                        modifier = Modifier.weight(1f)
+                    )
+                    OpenTuneLibraryShortcut(
+                        icon = Icons.Filled.History,
+                        title = "Replay",
+                        subtitle = "Your top songs",
+                        badgeColor = badgeContainerColor,
+                        badgeTint = badgeIconTint,
+                        cardColor = tileSurfaceColor,
+                        onClick = { showReplayDialog = true },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OpenTuneLibraryShortcut(
+                        icon = Icons.Filled.Headphones,
+                        title = "DualBud",
+                        subtitle = "Split L/R audio",
+                        badgeColor = badgeContainerColor,
+                        badgeTint = badgeIconTint,
+                        cardColor = tileSurfaceColor,
+                        onClick = onNavigateToDualBud,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OpenTuneLibraryShortcut(
+                        icon = Icons.Filled.Tune,
+                        title = "Audio Lab",
+                        subtitle = "15-band EQ & FX",
+                        badgeColor = badgeContainerColor,
+                        badgeTint = badgeIconTint,
+                        cardColor = tileSurfaceColor,
+                        onClick = onOpenAudioLab,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OpenTuneLibraryShortcut(
+                        icon = Icons.Filled.Groups,
+                        title = "Listen together",
+                        subtitle = "Rooms with friends, in sync",
+                        badgeColor = badgeContainerColor,
+                        badgeTint = badgeIconTint,
+                        cardColor = tileSurfaceColor,
+                        onClick = onNavigateToSyncPlay,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Spotify Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .bouncyPopClick { showCreatePlaylistDialog = true }
+                        .padding(horizontal = 4.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1DB954)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.GraphicEq,
+                            contentDescription = "Spotify",
+                            tint = Color.Black,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 16.dp)
+                    ) {
+                        Text(
+                            text = "Spotify",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = if (isSpotifyConnected) "Connected • Import from link" else "Connect or import",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // ── OpenTune "Playlists" Header + Horizontal Tile Carousel ──────────
+        item(key = "opentune_playlists_header") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Playlists",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                TextButton(onClick = { selectedSection = LibrarySubPage.PLAYLISTS }) {
+                    Text(
+                        text = "Show all",
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (ThemeState.isDarkMode) Color(0xFFD6B966) else MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
+        item(key = "opentune_playlist_tiles") {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                item(key = "tile_new") {
+                    OpenTunePlaylistTile(
+                        title = "New playlist",
+                        subtitle = "On this phone",
+                        cardColor = tileSurfaceColor,
+                        onClick = { showCreatePlaylistDialog = true }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+                }
+                item(key = "tile_import_spotify") {
+                    OpenTunePlaylistTile(
+                        title = "Import Spotify",
+                        subtitle = "From a playlist link",
+                        cardColor = tileSurfaceColor,
+                        onClick = { showCreatePlaylistDialog = true }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF1DB954)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.GraphicEq,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(34.dp)
+                            )
+                        }
+                    }
+                }
+                item(key = "tile_liked") {
+                    OpenTunePlaylistTile(
+                        title = "Liked Music",
+                        subtitle = "Auto playlist · ${favoriteSongs.size} songs",
+                        background = Brush.verticalGradient(listOf(Color(0xFF8C6AF0), Color(0xFFF95AAE))),
+                        cardColor = tileSurfaceColor,
+                        onClick = { selectedSection = LibrarySubPage.LIKED }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Favorite,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(64.dp)
+                        )
+                    }
+                }
+                items(playlists.take(8), key = { "pl_tile_${it.id}" }) { playlist ->
+                    val stats = playlistStats[playlist.id]
+                    val countText = stats?.let { "${it.totalCount} songs" } ?: "Playlist"
+                    OpenTunePlaylistTile(
+                        title = playlist.name,
+                        subtitle = "On this phone · $countText",
+                        cardColor = tileSurfaceColor,
+                        onClick = { onPlaylistClick(playlist.id) }
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(48.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OpenTuneLibraryExperienceCards(
+    userName: String,
+    recentHistory: List<PlayedSongHistoryEntity>,
+    mostPlayed: List<SongEntity>,
+    favoriteSongs: List<SongEntity>,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val calendar = remember { Calendar.getInstance() }
+    val year = calendar.get(Calendar.YEAR)
+    val firstPlayedAt = remember(recentHistory, mostPlayed) {
+        recentHistory.minOfOrNull { it.playedAt } ?: System.currentTimeMillis()
+    }
+    val memberSince = remember(firstPlayedAt) {
+        val c = Calendar.getInstance().apply { timeInMillis = firstPlayedAt }
+        "%02d/%02d".format(c.get(Calendar.MONTH) + 1, c.get(Calendar.YEAR) % 100)
+    }
+    val totalPlays = recentHistory.size.coerceAtLeast(mostPlayed.size)
+    val totalMinutes = remember(recentHistory, mostPlayed) {
+        val histMs = recentHistory.sumOf { it.durationMs.coerceAtLeast(0L) }
+        val localMs = mostPlayed.sumOf { it.duration.coerceAtLeast(0L) }
+        TimeUnit.MILLISECONDS.toMinutes(maxOf(histMs, localMs))
+    }
+    val topSong = recentHistory.firstOrNull()?.let { it.title to it.artist }
+        ?: mostPlayed.firstOrNull()?.let { it.title to it.artist }
+        ?: favoriteSongs.firstOrNull()?.let { it.title to it.artist }
+    val topArtist = remember(recentHistory, mostPlayed, favoriteSongs) {
+        recentHistory.groupBy { it.artist.ifBlank { "Unknown Artist" } }
+            .maxByOrNull { it.value.size }
+            ?.let { it.key to "${it.value.size} plays" }
+            ?: mostPlayed.firstOrNull()?.let { it.artist.ifBlank { "Unknown Artist" } to "Top Artist" }
+    }
+    val topAlbum = remember(mostPlayed, favoriteSongs) {
+        (mostPlayed + favoriteSongs).firstOrNull { it.album.isNotBlank() }?.let { it.album to it.artist }
+    }
+
+    data class ExpCardData(
+        val value: String,
+        val label: String,
+        val detail: String,
+        val top: Color,
+        val bottom: Color
+    )
+
+    val cards = remember(totalMinutes, totalPlays, year, topSong, topArtist, topAlbum) {
+        buildList {
+            add(
+                ExpCardData(
+                    value = "$totalMinutes",
+                    label = "MINUTES LISTENED",
+                    detail = "${if (totalPlays == 1) "1 Play" else "$totalPlays Plays"} · $year",
+                    top = Color(0xFF5E1C5C),
+                    bottom = Color(0xFF2E1030)
+                )
+            )
+            topSong?.let { (title, artist) ->
+                add(
+                    ExpCardData(
+                        value = title,
+                        label = "TOP SONG",
+                        detail = artist.ifBlank { "MyPlayer Library" },
+                        top = Color(0xFF6B2466),
+                        bottom = Color(0xFF321234)
+                    )
+                )
+            }
+            topArtist?.let { (artist, playsLabel) ->
+                add(
+                    ExpCardData(
+                        value = artist,
+                        label = "TOP ARTIST",
+                        detail = playsLabel,
+                        top = Color(0xFF2F4B49),
+                        bottom = Color(0xFF17221F)
+                    )
+                )
+            }
+            topAlbum?.let { (album, artist) ->
+                add(
+                    ExpCardData(
+                        value = album,
+                        label = "TOP ALBUM",
+                        detail = artist.ifBlank { "Collection" },
+                        top = Color(0xFF15558A),
+                        bottom = Color(0xFF0B2A47)
+                    )
+                )
+            }
+        }
+    }
+
+    val listState = rememberLazyListState()
+    val lift = remember { Shadow(Color.Black.copy(alpha = 0.45f), blurRadius = 18f) }
+
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val cardWidth = (maxWidth - 56.dp).coerceAtMost(420.dp)
+        LazyRow(
+            state = listState,
+            flingBehavior = rememberSnapFlingBehavior(listState),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            itemsIndexed(cards) { _, face ->
+                Column(
+                    modifier = Modifier
+                        .width(cardWidth)
+                        .height(198.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(Brush.linearGradient(listOf(face.top, face.bottom)))
+                        .bouncyPopClick(onClick = onClick)
+                        .padding(horizontal = 22.dp, vertical = 18.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "YOUR LISTENING EXPERIENCE",
+                            modifier = Modifier.weight(1f),
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.6.sp,
+                            maxLines = 1
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.GraphicEq,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = face.value,
+                        color = Color.White,
+                        style = TextStyle(
+                            fontSize = if (face.value.length > 14) 26.sp else 36.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            lineHeight = 32.sp,
+                            shadow = lift
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = face.label,
+                        color = Color.White.copy(alpha = 0.78f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = userName.uppercase(),
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.6.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = face.detail,
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "MEMBER SINCE",
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.2.sp
+                            )
+                            Text(
+                                text = memberSince,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 2.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OpenTuneLibraryShortcut(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    badgeColor: Color,
+    badgeTint: Color,
+    cardColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .height(72.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(cardColor)
+            .bouncyPopClick(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(badgeColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = badgeTint,
+                modifier = Modifier.size(21.dp)
+            )
+        }
+        Column(Modifier.padding(start = 12.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun OpenTunePlaylistTile(
+    title: String,
+    subtitle: String,
+    cardColor: Color,
+    background: Brush? = null,
+    onClick: () -> Unit,
+    art: @Composable () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(164.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .bouncyPopClick(onClick = onClick)
+            .padding(4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(20.dp))
+                .then(
+                    if (background != null) Modifier.background(background)
+                    else Modifier.background(cardColor)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            art()
+        }
+        Text(
+            text = title,
+            modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = subtitle,
+            modifier = Modifier.padding(horizontal = 2.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
