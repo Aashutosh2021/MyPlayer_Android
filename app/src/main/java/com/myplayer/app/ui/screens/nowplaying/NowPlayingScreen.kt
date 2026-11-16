@@ -85,6 +85,7 @@ fun NowPlayingScreen(
     var showCustomLyricsDialog by remember { mutableStateOf(false) }
     var showMoreSheet by remember { mutableStateOf(false) }
     var showLyricsDialog by remember { mutableStateOf(false) }
+    var showMultiOutputStudio by remember { mutableStateOf(false) }
 
 
 
@@ -156,6 +157,12 @@ fun NowPlayingScreen(
         SignalPathInspectorDialog(
             qualityInfo = audioQuality,
             onDismiss = { showQualityDetails = false }
+        )
+    }
+
+    if (showMultiOutputStudio) {
+        com.myplayer.app.ui.opentune.OpenTuneMultiOutputStudioDialog(
+            onDismiss = { showMultiOutputStudio = false }
         )
     }
 
@@ -365,6 +372,11 @@ fun NowPlayingScreen(
                         text = { Text("Sleep Timer", color = MaterialTheme.colorScheme.onSurface) },
                         leadingIcon = { Icon(Icons.Filled.Timer, null, tint = MaterialTheme.colorScheme.onSurface) },
                         onClick = { showMoreSheet = false; showSleepTimer = true }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Multi-Output & Separate Sound (Speaker / Buds)", color = MaterialTheme.colorScheme.onSurface) },
+                        leadingIcon = { Icon(Icons.Filled.Speaker, null, tint = MaterialTheme.colorScheme.primary) },
+                        onClick = { showMoreSheet = false; showMultiOutputStudio = true }
                     )
                     DropdownMenuItem(
                         text = { Text("Audio Quality (${audioQuality.displayBadge})", color = MaterialTheme.colorScheme.onSurface) },

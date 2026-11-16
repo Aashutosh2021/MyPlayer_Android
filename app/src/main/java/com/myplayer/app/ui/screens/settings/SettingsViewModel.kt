@@ -69,6 +69,7 @@ class SettingsViewModel @Inject constructor(
     val autoEqManager: AutoEqManager,
     val sponsorBlockManager: SponsorBlockManager,
     val localCastManager: LocalCastManager,
+    val audioOutputRouterManager: com.myplayer.app.playback.AudioOutputRouterManager,
     val shazamRecognizer: ShazamRecognizer,
     val musicController: MusicController
 ) : ViewModel() {

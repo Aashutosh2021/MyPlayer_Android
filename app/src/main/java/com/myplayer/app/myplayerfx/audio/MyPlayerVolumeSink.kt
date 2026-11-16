@@ -4,9 +4,13 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import com.myplayer.app.myplayerfx.AudioFxService
+import com.myplayer.app.playback.AudioOutputRouterManager
 import java.nio.ByteBuffer
 
-/** MyPlayer's volume stage: the exponential volume curve and the song's ReplayGain shape every volume the player sets. */
+/**
+ * MyPlayer's volume stage: the exponential volume curve, the song's ReplayGain, and
+ * Multi-Output Studio's independent app volume multiplier shape every volume the player sets.
+ */
 @UnstableApi
 class MyPlayerVolumeSink(
     delegate: AudioSink,
@@ -17,10 +21,17 @@ class MyPlayerVolumeSink(
     private var requestedVolume = 1f
     private var appliedCurve: VolumeCurve? = null
     private var appliedReplayGain = 1f
+    private var appliedIndependentVolume = 1f
 
     override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
-        // curve or ReplayGain changed: the player won't resend its unchanged volume
-        if (audioFx.volumeCurve !== appliedCurve || replayGainFactor() != appliedReplayGain) applyVolume()
+        val currentIndVol = AudioOutputRouterManager.currentIndependentVolumeMultiplier
+        // curve, ReplayGain, or Independent App Volume changed: update sink gain live
+        if (audioFx.volumeCurve !== appliedCurve ||
+            replayGainFactor() != appliedReplayGain ||
+            currentIndVol != appliedIndependentVolume
+        ) {
+            applyVolume()
+        }
         return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
     }
 
@@ -33,7 +44,9 @@ class MyPlayerVolumeSink(
         val curve = audioFx.volumeCurve
         appliedCurve = curve
         appliedReplayGain = replayGainFactor()
-        super.setVolume(curve.gain(requestedVolume) * appliedReplayGain)
+        appliedIndependentVolume = AudioOutputRouterManager.currentIndependentVolumeMultiplier
+        val effectiveInput = (requestedVolume * appliedIndependentVolume).coerceIn(0f, 1f)
+        super.setVolume(curve.gain(effectiveInput) * appliedReplayGain)
     }
 
     private fun replayGainFactor() = replayGain.linear(audioFx.replayGain, audioFx.normalize)

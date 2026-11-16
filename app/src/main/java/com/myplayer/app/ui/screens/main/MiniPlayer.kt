@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -105,6 +106,12 @@ fun MiniPlayer(
     val progress = (livePositionMs.toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f)
 
     var swipeOffsetX by remember { mutableFloatStateOf(0f) }
+    var showMultiOutputDialog by remember { mutableStateOf(false) }
+    if (showMultiOutputDialog) {
+        com.myplayer.app.ui.opentune.OpenTuneMultiOutputStudioDialog(
+            onDismiss = { showMultiOutputDialog = false }
+        )
+    }
     val animatedOffsetX by animateFloatAsState(
         targetValue = swipeOffsetX,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
@@ -240,6 +247,26 @@ fun MiniPlayer(
                                 fontSize = lerpFloat(12f, 11.5f, t).sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    // Quick Audio Output Router / Separate Sound button when MiniPlayer is expanded
+                    if (expandedContentAlpha > 0.01f && compactControlsAlpha <= 0.01f) {
+                        Box(
+                            modifier = Modifier
+                                .alpha(expandedContentAlpha)
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.16f))
+                                .clickable { showMultiOutputDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Speaker,
+                                contentDescription = "Audio Output & Separate Sound",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }

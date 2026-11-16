@@ -81,6 +81,7 @@ import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SettingsBackupRestore
+import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -142,6 +143,7 @@ import com.myplayer.app.ui.opentune.OpenTuneAutoEqDialog
 import com.myplayer.app.ui.opentune.OpenTuneCastDialog
 import com.myplayer.app.ui.opentune.OpenTuneGroupCard
 import com.myplayer.app.ui.opentune.OpenTuneGroupLabel
+import com.myplayer.app.ui.opentune.OpenTuneMultiOutputStudioDialog
 import com.myplayer.app.ui.opentune.OpenTuneNavRow
 import com.myplayer.app.ui.opentune.OpenTunePillSegmented
 import com.myplayer.app.ui.opentune.OpenTuneRecognizeDialog
@@ -317,6 +319,8 @@ fun SettingsScreen(
     var showAutoEqDialog by remember { mutableStateOf(false) }
     var showSponsorBlockDialog by remember { mutableStateOf(false) }
     var showCastDialog by remember { mutableStateOf(false) }
+    var showMultiOutputStudioDialog by remember { mutableStateOf(false) }
+    val multiOutputState by viewModel.audioOutputRouterManager.state.collectAsStateWithLifecycle()
     var showReplayDialog by remember { mutableStateOf(false) }
     var showRecognizeDialog by remember { mutableStateOf(false) }
 
@@ -395,6 +399,14 @@ fun SettingsScreen(
         OpenTuneCastDialog(
             localCastManager = viewModel.localCastManager,
             onDismiss = { showCastDialog = false }
+        )
+    }
+
+    if (showMultiOutputStudioDialog) {
+        OpenTuneMultiOutputStudioDialog(
+            routerManager = viewModel.audioOutputRouterManager,
+            onOpenDlnaCast = { showCastDialog = true },
+            onDismiss = { showMultiOutputStudioDialog = false }
         )
     }
 
@@ -1109,6 +1121,21 @@ fun SettingsScreen(
                 )
             }
         ),
+        SearchableSettingEntry(
+            categoryKey = "account",
+            categoryTitle = "Account & integrations",
+            groupTitle = "Listen together & multi-device",
+            title = "Multi-Output & Separate Sound Studio (Speaker + Earbuds + Reels)",
+            summary = multiOutputState.activeRouteSummary,
+            render = {
+                OpenTuneNavRow(
+                    title = "Multi-Output & Separate Sound Studio",
+                    summary = "${multiOutputState.activeScenario.badge} • ${multiOutputState.activeRouteSummary}",
+                    icon = Icons.Filled.Speaker,
+                    onClick = { showMultiOutputStudioDialog = true }
+                )
+            }
+        ),
 
         // 2. Listening history & Replay
         SearchableSettingEntry(
@@ -1156,6 +1183,21 @@ fun SettingsScreen(
                     value = OpenTuneUiPrefs.activeAutoEqModel,
                     icon = Icons.Filled.Headphones,
                     onClick = { showAutoEqDialog = true }
+                )
+            }
+        ),
+        SearchableSettingEntry(
+            categoryKey = "audio",
+            categoryTitle = "Sound and quality",
+            groupTitle = "Equalizer & headphone correction",
+            title = "Separate App Sound & Audio Output Router (Earbuds / Speaker / Reels)",
+            summary = "Route MyPlayer to Speaker or Earbuds while playing Instagram Reels or Movies simultaneously",
+            render = {
+                OpenTuneNavRow(
+                    title = "Separate App Sound & Output Router",
+                    summary = "${multiOutputState.activeRouteSummary} • Vol ${(multiOutputState.independentAppVolume * 100).toInt()}%",
+                    icon = Icons.Filled.Speaker,
+                    onClick = { showMultiOutputStudioDialog = true }
                 )
             }
         ),

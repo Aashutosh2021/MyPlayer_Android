@@ -5,7 +5,12 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Base64
+import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -14,8 +19,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import java.io.IOException
 import java.util.TimeZone
 import java.util.UUID
 import java.util.zip.CRC32
@@ -26,6 +30,7 @@ import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 data class RecognizedSong(
     val title: String,
@@ -37,68 +42,117 @@ data class RecognizedSong(
 )
 
 /**
- * OpenTune Shazam Audio Fingerprinting ("What's This Song?") ported to MyPlayer.
+ * Shazam audio fingerprinting ("What's This Song?") using SongRec / OpenTune's
+ * 16 kHz mono 2048-point FFT constellation signature and non-blocking async lookups.
  */
 @Singleton
 class ShazamRecognizer @Inject constructor(
     private val okHttpClient: OkHttpClient
 ) {
     companion object {
+        private const val TAG = "ShazamRecognizer"
         private const val SHAZAM_ENDPOINT = "https://amp.shazam.com/discovery/v5/en/US/android/-/tag"
         private const val SAMPLE_RATE = 16_000
+        private val ASK_AT_SEC = intArrayOf(4, 7, 10, 13)
     }
 
     @SuppressLint("MissingPermission")
-    suspend fun recognizeFromMicrophone(maxDurationSeconds: Int = 9): RecognizedSong? = withContext(Dispatchers.IO) {
+    suspend fun recognizeFromMicrophone(
+        maxDurationSeconds: Int = 14,
+        onProgress: ((level: Float, seconds: Float) -> Unit)? = null
+    ): RecognizedSong? = withContext(Dispatchers.Default) {
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT
-        ).coerceAtLeast(4096)
+        )
+        if (minBuf <= 0) {
+            throw IllegalStateException("Audio input buffer unavailable ($minBuf)")
+        }
 
         val recorder = AudioRecord(
             MediaRecorder.AudioSource.MIC,
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
-            minBuf * 2
+            maxOf(minBuf, SAMPLE_RATE)
         )
         if (recorder.state != AudioRecord.STATE_INITIALIZED) {
             recorder.release()
-            return@withContext null
+            throw IllegalStateException("Couldn't initialize microphone")
         }
 
         val signature = ShazamBinarySignature()
-        val readBuf = ShortArray(2048)
-        val startMs = System.currentTimeMillis()
-        var lastLookupSec = 2
+        val readBuf = ShortArray(SAMPLE_RATE / 10)
+        val askSchedule = ASK_AT_SEC.filter { it <= maxDurationSeconds }.ifEmpty { listOf(maxDurationSeconds.coerceAtLeast(3)) }
+        var askIdx = 0
+        var activeLookup: Deferred<RecognizedSong?>? = null
+        var lastLookupError: Throwable? = null
 
         try {
             recorder.startRecording()
-            while (isActive && (System.currentTimeMillis() - startMs) < maxDurationSeconds * 1000L) {
-                val read = recorder.read(readBuf, 0, readBuf.size)
-                if (read > 0) {
+            if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                throw IllegalStateException("Microphone is busy or blocked")
+            }
+
+            coroutineScope {
+                while (isActive) {
+                    val read = recorder.read(readBuf, 0, readBuf.size)
+                    if (read < 0) throw IOException("Microphone stopped responding (error $read)")
+                    if (read == 0) continue
+
                     signature.addSamples(readBuf, read)
+
+                    var sum = 0.0
+                    for (i in 0 until read) sum += readBuf[i] * readBuf[i].toDouble()
+                    val level = (sqrt(sum / read) / 6000.0).toFloat().coerceIn(0f, 1f)
+                    val seconds = signature.durationMs / 1000f
+                    onProgress?.invoke(level, seconds)
+
+                    activeLookup?.takeIf { it.isCompleted }?.let { done ->
+                        val found = runCatching { done.await() }.getOrElse { err ->
+                            lastLookupError = err
+                            null
+                        }
+                        if (found != null) return@coroutineScope found
+                        activeLookup = null
+                    }
+
+                    if (activeLookup == null && askIdx < askSchedule.size && seconds >= askSchedule[askIdx]) {
+                        askIdx++
+                        val encodedSig = signature.encode()
+                        val sampleMs = signature.durationMs
+                        activeLookup = async(Dispatchers.IO) {
+                            queryShazamEndpoint(encodedSig, sampleMs)
+                        }
+                    }
+
+                    if ((askIdx >= askSchedule.size && activeLookup == null) ||
+                        seconds >= maxDurationSeconds + 1f
+                    ) {
+                        break
+                    }
                 }
-                val elapsedSec = ((System.currentTimeMillis() - startMs) / 1000L).toInt()
-                if (elapsedSec >= lastLookupSec && signature.peakCount >= 24) {
-                    lastLookupSec = elapsedSec + 2
-                    val encodedSig = signature.encode()
-                    val match = queryShazamEndpoint(encodedSig, elapsedSec * 1000L)
-                    if (match != null) return@withContext match
+
+                val lastMatch = activeLookup?.let { done ->
+                    runCatching { done.await() }.getOrElse { err ->
+                        lastLookupError = err
+                        null
+                    }
                 }
+                if (lastMatch != null) return@coroutineScope lastMatch
+                if (lastLookupError != null) throw lastLookupError!!
+                null
             }
-            if (signature.peakCount > 12) {
-                return@withContext queryShazamEndpoint(signature.encode(), (System.currentTimeMillis() - startMs))
-            }
+        } catch (e: CancellationException) {
+            throw e
         } finally {
             runCatching { recorder.stop() }
             runCatching { recorder.release() }
         }
-        null
     }
 
-    private suspend fun queryShazamEndpoint(signatureBytes: ByteArray, sampleMs: Long): RecognizedSong? =
+    internal suspend fun queryShazamEndpoint(signatureBytes: ByteArray, sampleMs: Long): RecognizedSong? =
         withContext(Dispatchers.IO) {
             val uri = "data:audio/vnd.shazam.sig;base64," + Base64.encodeToString(signatureBytes, Base64.NO_WRAP)
             val payload = JSONObject()
@@ -118,15 +172,17 @@ class ShazamRecognizer @Inject constructor(
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            runCatching {
-                okHttpClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@use null
-                    parseShazamJson(resp.body?.string().orEmpty())
+            okHttpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val errMsg = "Shazam lookup failed (HTTP ${resp.code})"
+                    Log.w(TAG, errMsg)
+                    throw IOException(errMsg)
                 }
-            }.getOrNull()
+                parseShazamJson(resp.body?.string().orEmpty())
+            }
         }
 
-    private fun parseShazamJson(rawJson: String): RecognizedSong? {
+    internal fun parseShazamJson(rawJson: String): RecognizedSong? {
         if (rawJson.isBlank()) return null
         val root = JSONObject(rawJson)
         val track = root.optJSONObject("track") ?: return null
@@ -166,8 +222,24 @@ internal class ShazamBinarySignature {
         private const val BINS = 1025
         private const val STEP = 128
         private const val RING = 256
-        private val BANDS = intArrayOf(250, 520, 1450, 3500, 5500).map { it * WINDOW / 16_000 }.toIntArray()
-        private val HANN = DoubleArray(WINDOW) { i -> 0.5 - 0.5 * cos(2.0 * PI * i / (WINDOW - 1)) }
+        private val FORMER = intArrayOf(-1, -3, -6)
+        private val NEIGHBOURS = intArrayOf(-10, -7, -4, -3, 1, 2, 5, 8)
+        private val OTHER_FRAMES = intArrayOf(-53, -45) + (165..200 step 7).toList() + (214..249 step 7).toList()
+        private val HANN = DoubleArray(WINDOW) { 0.5 - 0.5 * cos(2 * PI * (it + 1) / 2049) }
+
+        private operator fun IntArray.plus(other: List<Int>): IntArray = (this.toList() + other).toIntArray()
+
+        private fun ByteArrayOutputStream.le32(v: Int) {
+            write(v and 0xFF)
+            write((v ushr 8) and 0xFF)
+            write((v ushr 16) and 0xFF)
+            write((v ushr 24) and 0xFF)
+        }
+
+        private fun ByteArrayOutputStream.le16(v: Int) {
+            write(v and 0xFF)
+            write((v ushr 8) and 0xFF)
+        }
     }
 
     private val samples = ShortArray(WINDOW)
@@ -188,8 +260,9 @@ internal class ShazamBinarySignature {
     private var pendingCount = 0
 
     val peakCount: Int get() = peaks.values.sumOf { it.size }
+    val durationMs: Long get() = sampleCount * 1000L / 16_000L
 
-    fun addSamples(pcm: ShortArray, count: Int) {
+    fun addSamples(pcm: ShortArray, count: Int = pcm.size) {
         for (i in 0 until count) {
             pending[pendingCount++] = pcm[i]
             if (pendingCount == STEP) {
@@ -211,90 +284,104 @@ internal class ShazamBinarySignature {
         }
         inPlaceRadix2Fft(re, im)
         val out = ffts[fftAt]
-        fftAt = (fftAt + 1) % RING
         for (b in 0 until BINS) {
             val magSq = (re[b] * re[b] + im[b] * im[b]) / (1 shl 17)
             out[b] = max(magSq, 1e-10).toFloat()
         }
+        fftAt = (fftAt + 1) % RING
     }
 
     private fun spreadPeaks() {
-        val src = ffts[(fftAt - 1 + RING) % RING]
-        val dst = spread[spreadAt]
-        System.arraycopy(src, 0, dst, 0, BINS)
-        for (b in 0 until BINS - 2) {
-            dst[b] = maxOf(dst[b], dst[b + 1], dst[b + 2])
-        }
-        for (past in intArrayOf(1, 3, 6)) {
-            val prev = spread[(spreadAt - past + RING) % RING]
-            for (b in 0 until BINS) prev[b] = max(prev[b], dst[b])
+        val origin = ffts[(fftAt - 1 + RING) % RING]
+        val s = spread[spreadAt]
+        origin.copyInto(s)
+        for (p in 0 until BINS) {
+            if (p < BINS - 2) s[p] = max(s[p], max(s[p + 1], s[p + 2]))
+            var top = s[p]
+            for (back in FORMER) {
+                val former = spread[(spreadAt + back + RING) % RING]
+                top = max(former[p], top)
+                former[p] = top
+            }
         }
         spreadAt = (spreadAt + 1) % RING
         spreadWritten++
     }
 
     private fun extractLocalMaxima() {
-        val centerIdx = (fftAt - 46 + RING) % RING
-        val spec = ffts[centerIdx]
-        val passNum = spreadWritten - 46
-        for (b in BANDS[0] until BANDS.last()) {
-            val valMag = spec[b]
-            if (valMag < 1f / 64f) continue
-            if (valMag <= spread[(centerIdx - 1 + RING) % RING][b]) continue
-            val magScaled = (max(ln(valMag.toDouble()) - ln(1.0 / 64.0), 0.0) * 1477.3).toInt()
-            val bandIdx = (0 until BANDS.size - 1).firstOrNull { b in BANDS[it] until BANDS[it + 1] } ?: continue
-            peaks.getOrPut(bandIdx) { mutableListOf() }.add(Peak(passNum, magScaled, b))
+        val f46 = ffts[(fftAt - 46 + RING) % RING]
+        val s49 = spread[(spreadAt - 49 + RING) % RING]
+        for (bin in 10 until 1015) {
+            val v = f46[bin]
+            if (v < 1f / 64f || v < s49[bin - 1]) continue
+            var near = 0f
+            for (o in NEIGHBOURS) near = max(s49[bin + o], near)
+            if (v <= near) continue
+            var around = near
+            for (o in OTHER_FRAMES) around = max(spread[((spreadAt + o) % RING + RING) % RING][bin - 1], around)
+            if (v <= around) continue
+
+            val pass = spreadWritten - 46
+            val magnitude = ln(max(1f / 64f, v)) * 1477.3f + 6144f
+            val before = ln(max(1f / 64f, f46[bin - 1])) * 1477.3f + 6144f
+            val after = ln(max(1f / 64f, f46[bin + 1])) * 1477.3f + 6144f
+            val variation1 = magnitude * 2f - before - after
+            if (variation1 <= 0f) continue
+            val variation2 = (after - before) * 32f / variation1
+            val corrected = bin * 64f + variation2
+            val hz = corrected * (16_000f / 2f / 1024f / 64f)
+            val band = when {
+                hz > 250f && hz < 520f -> 0
+                hz > 520f && hz < 1450f -> 1
+                hz > 1450f && hz < 3500f -> 2
+                hz > 3500f && hz <= 5500f -> 3
+                else -> continue
+            }
+            peaks.getOrPut(band) { mutableListOf() }.add(Peak(pass, magnitude.toInt(), corrected.toInt()))
         }
     }
 
     fun encode(): ByteArray {
-        val bodyBos = ByteArrayOutputStream()
+        val contents = ByteArrayOutputStream()
         for ((band, list) in peaks) {
-            val bandBos = ByteArrayOutputStream()
-            var lastPass = 0
+            val body = ByteArrayOutputStream()
+            var pass = 0
             for (p in list) {
-                val delta = p.pass - lastPass
-                if (delta >= 255) {
-                    bandBos.write(0xFF)
-                    val bb = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(p.pass).array()
-                    bandBos.write(bb)
-                } else {
-                    bandBos.write(delta)
+                if (p.pass - pass >= 255) {
+                    body.write(0xFF)
+                    body.le32(p.pass)
+                    pass = p.pass
                 }
-                val magBytes = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(p.magnitude.toShort()).array()
-                val binBytes = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(p.bin.toShort()).array()
-                bandBos.write(magBytes)
-                bandBos.write(binBytes)
-                lastPass = p.pass
+                body.write(p.pass - pass)
+                body.le16(p.magnitude)
+                body.le16(p.bin)
+                pass = p.pass
             }
-            val rawBand = bandBos.toByteArray()
-            val header = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(0x60030040 + band)
-                .putInt(rawBand.size)
-                .array()
-            bodyBos.write(header)
-            bodyBos.write(rawBand)
-            while (bodyBos.size() % 4 != 0) bodyBos.write(0)
+            val bytes = body.toByteArray()
+            contents.le32(0x60030040 + band)
+            contents.le32(bytes.size)
+            contents.write(bytes)
+            repeat((4 - bytes.size % 4) % 4) { contents.write(0) }
         }
-        val payload = bodyBos.toByteArray()
-        val totalLen = payload.size + 48
-        val full = ByteBuffer.allocate(totalLen).order(ByteOrder.LITTLE_ENDIAN)
-        full.putInt(0xCAFE2580.toInt())
-        full.putInt(0)
-        full.putInt(totalLen - 48)
-        full.putInt(0x94119C00.toInt())
-        full.putInt(0); full.putInt(0); full.putInt(0)
-        full.putInt(3 shl 27)
-        full.putInt(0); full.putInt(0)
-        full.putInt(sampleCount + (sampleCount * 0.24).toInt())
-        full.putInt((15 shl 19) + 0x40000)
-        full.putInt(0x40000000)
-        full.putInt(totalLen - 40)
-        full.put(payload)
-        val arr = full.array()
-        val crc = CRC32().apply { update(arr, 8, arr.size - 8) }.value.toInt()
-        ByteBuffer.wrap(arr, 4, 4).order(ByteOrder.LITTLE_ENDIAN).putInt(crc)
-        return arr
+        val payload = contents.toByteArray()
+        val out = ByteArrayOutputStream()
+        // 56-byte prefix (48-byte Shazam header + 8-byte signature tag header); CRC written after assembly
+        out.le32(0xCAFE2580.toInt())
+        out.le32(0)
+        out.le32(payload.size + 8)
+        out.le32(0x94119C00.toInt())
+        repeat(3) { out.le32(0) }
+        out.le32(3 shl 27)
+        repeat(2) { out.le32(0) }
+        out.le32((sampleCount + 16_000 * 0.24).toInt())
+        out.le32((15 shl 19) + 0x40000)
+        out.le32(0x40000000)
+        out.le32(payload.size + 8)
+        out.write(payload)
+        val all = out.toByteArray()
+        val crc = CRC32().apply { update(all, 8, all.size - 8) }.value.toInt()
+        for (k in 0 until 4) all[4 + k] = (crc ushr (8 * k)).toByte()
+        return all
     }
 
     private fun inPlaceRadix2Fft(re: DoubleArray, im: DoubleArray) {
@@ -302,7 +389,10 @@ internal class ShazamBinarySignature {
         var j = 0
         for (i in 1 until n) {
             var bit = n shr 1
-            while (j and bit != 0) { j = j xor bit; bit = bit shr 1 }
+            while (j and bit != 0) {
+                j = j xor bit
+                bit = bit shr 1
+            }
             j = j xor bit
             if (i < j) {
                 val tr = re[i]; re[i] = re[j]; re[j] = tr

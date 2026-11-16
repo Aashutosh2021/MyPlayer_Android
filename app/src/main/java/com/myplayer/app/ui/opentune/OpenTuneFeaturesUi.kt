@@ -1465,15 +1465,24 @@ fun OpenTuneRecognizeDialog(
         statusText = "Listening to music nearby... Hold phone closer to the speaker"
         scope.launch {
             val result = runCatching {
-                shazamRecognizer.recognizeFromMicrophone(maxDurationSeconds = 9)
-            }.getOrNull()
+                shazamRecognizer.recognizeFromMicrophone(maxDurationSeconds = 14) { _, secs ->
+                    if (isListening && secs >= 1f) {
+                        statusText = "Listening... ${secs.toInt()}s"
+                    }
+                }
+            }
             isListening = false
-            if (result != null) {
-                matchedSong = result
-                historyList = (listOf(result) + historyList).distinctBy { "${it.title}_${it.artist}" }.take(15)
-                statusText = "Match found!"
-            } else {
-                statusText = "Couldn't catch that song. Make sure music is audible and tap to try again."
+            result.onSuccess { song ->
+                if (song != null) {
+                    matchedSong = song
+                    historyList = (listOf(song) + historyList).distinctBy { "${it.title}_${it.artist}" }.take(15)
+                    statusText = "Match found!"
+                } else {
+                    statusText = "Couldn't catch that song. Make sure music is audible and tap to try again."
+                }
+            }.onFailure { err ->
+                statusText = err.message?.takeIf { it.isNotBlank() }
+                    ?: "Recognition failed. Check microphone & internet connection."
             }
         }
     }
@@ -2338,6 +2347,423 @@ fun OpenTuneReplayDialog(
                                 contentDescription = "Play",
                                 tint = MaterialTheme.colorScheme.primary
                             )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 11. MULTI-OUTPUT & SEPARATE SOUND STUDIO DIALOG (3 Scenarios + Live Device Pinning + Simultaneous Reels/Movie Playback)
+// ═════════════════════════════════════════════════════════════════════════════
+
+@Composable
+fun OpenTuneMultiOutputStudioDialog(
+    routerManager: com.myplayer.app.playback.AudioOutputRouterManager? = null,
+    onOpenDlnaCast: (() -> Unit)? = null,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val manager = remember(routerManager, context) {
+        routerManager ?: com.myplayer.app.playback.AudioOutputRouterManager.getInstance(context)
+    }
+    val state by manager.state.collectAsState()
+
+    LaunchedEffect(Unit) {
+        manager.refreshConnectedDevicesAndApplyRouting()
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 20.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Speaker,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Multi-Output & Separate Sound",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "Route MyPlayer to Speaker/Earbuds while playing Reels or Movies",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = { manager.refreshConnectedDevicesAndApplyRouting() }) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = "Refresh Devices",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    // Active Route Status Card
+                    item {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            shape = RoundedCornerShape(22.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (state.ignoreAudioFocus || state.pinnedDeviceId != null)
+                                                    Color(0xFF10B981)
+                                                else MaterialTheme.colorScheme.primary
+                                            )
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = state.activeRouteSummary,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = state.statusHint,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    // 1. Simultaneous Playback & Independent App Volume
+                    item { OpenTuneGroupLabel("Simultaneous Playback & App Volume") }
+                    item {
+                        OpenTuneGroupCard {
+                            OpenTuneToggleRow(
+                                title = "Play With Reels & Movies (Ignore Audio Focus)",
+                                summary = "Keep MyPlayer songs playing without pausing when Instagram Reels, YouTube, or a Movie starts",
+                                icon = Icons.Filled.PlayArrow,
+                                checked = state.ignoreAudioFocus,
+                                onChange = { manager.setIgnoreAudioFocus(it) }
+                            )
+                            OpenTuneRowDivider()
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp, vertical = 14.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Independent MyPlayer Volume",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "${(state.independentAppVolume * 100).toInt()}%",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(
+                                    text = "Lower MyPlayer's song volume while watching Reels/Movies without changing phone system volume",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                androidx.compose.material3.Slider(
+                                    value = state.independentAppVolume,
+                                    onValueChange = { manager.setIndependentAppVolume(it) },
+                                    valueRange = 0.05f..1.0f,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(
+                                        0.25f to "25% Bg",
+                                        0.50f to "50% Mix",
+                                        0.75f to "75%",
+                                        1.00f to "100% Full"
+                                    ).forEach { (vol, label) ->
+                                        val isSelected = kotlin.math.abs(state.independentAppVolume - vol) < 0.03f
+                                        Surface(
+                                            shape = RoundedCornerShape(999.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(999.dp))
+                                                .clickable { manager.setIndependentAppVolume(vol) }
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                                else MaterialTheme.colorScheme.onSurface,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.padding(vertical = 8.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Three Scenario Presets
+                    item { OpenTuneGroupLabel("3 Multi-Output Scenario Presets") }
+                    items(
+                        items = com.myplayer.app.playback.MultiOutputScenario.entries,
+                        key = { it.id }
+                    ) { scenario ->
+                        val selected = state.activeScenario == scenario && state.pinnedDeviceId == null
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 5.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable { manager.applyScenario(scenario) },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                            else MaterialTheme.colorScheme.surfaceContainer,
+                            border = BorderStroke(
+                                width = if (selected) 1.5.dp else 1.dp,
+                                color = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = when (scenario) {
+                                        com.myplayer.app.playback.MultiOutputScenario.DEFAULT_SYSTEM -> Icons.Filled.Equalizer
+                                        com.myplayer.app.playback.MultiOutputScenario.SCENARIO_1_MYPLAYER_BT_REELS_PHONE -> Icons.Filled.Headphones
+                                        com.myplayer.app.playback.MultiOutputScenario.SCENARIO_2_MYPLAYER_SPEAKER_REELS_EARBUDS -> Icons.Filled.Speaker
+                                        com.myplayer.app.playback.MultiOutputScenario.SCENARIO_3_DUAL_EXTERNAL_SINKS -> Icons.Filled.Cast
+                                    },
+                                    contentDescription = null,
+                                    tint = if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(Modifier.width(14.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = scenario.title,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(999.dp),
+                                            color = if (selected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.surfaceContainerHighest
+                                        ) {
+                                            Text(
+                                                text = scenario.badge,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = scenario.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (selected) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckCircle,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Live Connected Hardware Audio Sinks
+                    item {
+                        OpenTuneGroupLabel("Connected Audio Outputs (Tap to Lock MyPlayer)")
+                    }
+                    if (state.connectedDevices.isEmpty()) {
+                        item {
+                            Text(
+                                text = "Scanning audio outputs...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                            )
+                        }
+                    } else {
+                        items(
+                            items = state.connectedDevices,
+                            key = { "${it.id}_${it.productName}" }
+                        ) { device ->
+                            val isPinned = device.isPinnedByMyPlayer
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .clickable {
+                                        if (isPinned && state.pinnedDeviceId == device.id) {
+                                            manager.pinSpecificDevice(null)
+                                        } else {
+                                            manager.pinSpecificDevice(device)
+                                        }
+                                    },
+                                shape = RoundedCornerShape(18.dp),
+                                color = if (isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                else MaterialTheme.colorScheme.surfaceContainer,
+                                border = if (isPinned) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = when (device.category) {
+                                            com.myplayer.app.playback.OutputDeviceCategory.BLUETOOTH_A2DP,
+                                            com.myplayer.app.playback.OutputDeviceCategory.BLUETOOTH_LE,
+                                            com.myplayer.app.playback.OutputDeviceCategory.WIRED_AUX_HEADPHONES -> Icons.Filled.Headphones
+                                            else -> Icons.Filled.Speaker
+                                        },
+                                        contentDescription = null,
+                                        tint = if (isPinned) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = device.productName,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = buildString {
+                                                append(device.typeLabel)
+                                                append(" • Sink ID #${device.id}")
+                                                if (device.address.isNotBlank()) append(" • ${device.address}")
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = if (isPinned) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.surfaceContainerHighest
+                                    ) {
+                                        Text(
+                                            text = if (isPinned) "Locked for MyPlayer" else "Pin Output",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isPinned) MaterialTheme.colorScheme.onPrimary
+                                            else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. System Media Output & Network Speaker Bridges
+                    item { OpenTuneGroupLabel("Reels/Movie Output & Wi-Fi Speaker Tools") }
+                    item {
+                        OpenTuneGroupCard {
+                            OpenTuneNavRow(
+                                title = "System Media Output Switcher",
+                                summary = "Switch Instagram Reels / Movie output between Phone Speaker and Bluetooth",
+                                icon = Icons.Filled.Speaker,
+                                onClick = { manager.openSystemMediaOutputSwitcher(context) }
+                            )
+                            OpenTuneRowDivider()
+                            OpenTuneNavRow(
+                                title = "System Separate App Sound (Samsung / Xiaomi / OEM)",
+                                summary = "Open OS-level per-app audio router for Bluetooth + Phone Speaker split",
+                                icon = Icons.Filled.Equalizer,
+                                onClick = { manager.openOemSeparateAppSoundSettings(context) }
+                            )
+                            if (onOpenDlnaCast != null) {
+                                OpenTuneRowDivider()
+                                OpenTuneNavRow(
+                                    title = "Cast MyPlayer to Wi-Fi / DLNA Speaker",
+                                    summary = "Stream MyPlayer to a Wi-Fi speaker while Bluetooth Earbuds play Reels/Movies",
+                                    icon = Icons.Filled.Cast,
+                                    onClick = {
+                                        onDismiss()
+                                        onOpenDlnaCast()
+                                    }
+                                )
+                            }
                         }
                     }
                 }

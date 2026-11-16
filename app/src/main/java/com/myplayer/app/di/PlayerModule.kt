@@ -30,6 +30,7 @@ import androidx.media3.exoplayer.RendererCapabilities
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import com.myplayer.app.playback.AudioOutputRouterManager
 import com.myplayer.app.playback.dsp.LastWaveDspAudioProcessor
 import com.myplayer.app.playback.dsp.MasterAudioDspProcessor
 import com.myplayer.app.playback.dsp.SpatialAudioProcessor
@@ -334,7 +335,8 @@ object PlayerModule {
         lastWaveDspProcessor: LastWaveDspAudioProcessor,
         masterAudioDspProcessor: MasterAudioDspProcessor,
         spatialAudioProcessor: SpatialAudioProcessor,
-        audioFx: com.myplayer.app.myplayerfx.AudioFxService
+        audioFx: com.myplayer.app.myplayerfx.AudioFxService,
+        audioOutputRouterManager: AudioOutputRouterManager
     ): ExoPlayer {
         // MyPlayer Audio Lab chain (needs 16-bit PCM, so float output is off): spatial/surround/mono, reverb, loudness
         val replayGain = com.myplayer.app.myplayerfx.audio.ReplayGainTags()
@@ -462,15 +464,17 @@ object PlayerModule {
             setMediaCodecSelector(accurateAudioMediaCodecSelector)
         }
 
+        val initialIgnoreFocus = audioOutputRouterManager.state.value.ignoreAudioFocus
         return ExoPlayer.Builder(context, renderersFactory)
-            .setAudioAttributes(audioAttributes, true)
-            .setHandleAudioBecomingNoisy(true)
+            .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ !initialIgnoreFocus)
+            .setHandleAudioBecomingNoisy(!initialIgnoreFocus)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
             .build().apply {
                 repeatMode = initialRepeat
                 shuffleModeEnabled = initialShuffle
+                audioOutputRouterManager.attachExoPlayer(this, audioAttributes)
                 addListener(object : Player.Listener {
                     override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
                         replayGain.update(tracks)
