@@ -107,7 +107,7 @@ fun MiniPlayer(
 
     var swipeOffsetX by remember { mutableFloatStateOf(0f) }
     var showMultiOutputDialog by remember { mutableStateOf(false) }
-    if (showMultiOutputDialog) {
+    if (com.myplayer.app.BuildConfig.DEBUG && showMultiOutputDialog) {
         com.myplayer.app.ui.opentune.OpenTuneMultiOutputStudioDialog(
             onDismiss = { showMultiOutputDialog = false }
         )
@@ -251,8 +251,8 @@ fun MiniPlayer(
                         }
                     }
 
-                    // Quick Audio Output Router / Separate Sound button when MiniPlayer is expanded
-                    if (expandedContentAlpha > 0.01f && compactControlsAlpha <= 0.01f) {
+                    // Quick Audio Output Router / Separate Sound button when MiniPlayer is expanded (debug only)
+                    if (com.myplayer.app.BuildConfig.DEBUG && expandedContentAlpha > 0.01f && compactControlsAlpha <= 0.01f) {
                         Box(
                             modifier = Modifier
                                 .alpha(expandedContentAlpha)

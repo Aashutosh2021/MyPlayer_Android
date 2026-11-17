@@ -361,8 +361,8 @@ object PlayerModule {
             .setBufferDurationsMs(
                 /* minBufferMs = */ 9_000,                      // Trigger next 9s chunk fetch when buffer < 9s
                 /* maxBufferMs = */ 27_000,                     // Buffer up to 3x 9-second chunks ahead
-                /* bufferForPlaybackMs = */ 500,                // Ultra-fast start after 0.5s
-                /* bufferForPlaybackAfterRebufferMs = */ 1_500  // Smooth 1.5s resume after weak network stall
+                /* bufferForPlaybackMs = */ 1_000,              // Smooth 1.0s pre-buffer to prevent dual-sink startup zig-zag
+                /* bufferForPlaybackAfterRebufferMs = */ 2_000  // Smooth 2.0s resume after weak network stall
             )
             .setTargetBufferBytes(C.LENGTH_UNSET)
             .setPrioritizeTimeOverSizeThresholds(true)
@@ -453,7 +453,7 @@ object PlayerModule {
                     .setEnableFloatOutput(false)
                     .setEnableAudioTrackPlaybackParams(false)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
-                    .setAudioProcessors(arrayOf(masterAudioDspProcessor, lastWaveDspProcessor, spatialAudioProcessor, *myplayerFx))
+                    .setAudioProcessors(arrayOf(masterAudioDspProcessor, lastWaveDspProcessor, *myplayerFx))
                     .build()
                 return com.myplayer.app.myplayerfx.audio.MyPlayerVolumeSink(sink, audioFx, replayGain)
             }

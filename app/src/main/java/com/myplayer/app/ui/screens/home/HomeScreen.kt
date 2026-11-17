@@ -254,7 +254,7 @@ fun HomeScreen(
         )
     }
 
-    if (showRecognizeDialog) {
+    if (com.myplayer.app.BuildConfig.DEBUG && showRecognizeDialog) {
         OpenTuneRecognizeDialog(
             shazamRecognizer = viewModel.shazamRecognizer,
             onPlayMatchedSong = { title, artist, coverUrl ->
@@ -378,22 +378,24 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // 1. Shazam Recognize ("What's this song?")
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
-                            .clickable { showRecognizeDialog = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.GraphicEq,
-                            contentDescription = "Recognize song nearby",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    // 1. Shazam Recognize ("What's this song?") - debug only
+                    if (com.myplayer.app.BuildConfig.DEBUG) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), CircleShape)
+                                .clickable { showRecognizeDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.GraphicEq,
+                                contentDescription = "Recognize song nearby",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                     
                     // 3. Day / Night Theme Switcher

@@ -14,13 +14,18 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,9 +44,22 @@ class AudioFeatureManagers @Inject constructor(
     private val okHttpClient: OkHttpClient
 ) {
     private var crossfadeJob: Job? = null
-    private var rampInJob: Job? = null
+    private var overlapJob: Job? = null
+    private var tailPlayer: ExoPlayer? = null
     private var attachedPlayer: ExoPlayer? = null
     private var transitionListener: Player.Listener? = null
+
+    companion object {
+        /**
+         * Constant-power equal-loudness gains `(outgoingGain, incomingGain)` for normalized
+         * crossfade [progress] in `0f..1f`. `out^2 + in^2 == 1.0` so combined volume never dips.
+         */
+        internal fun equalPowerGains(progress: Float): Pair<Float, Float> {
+            val p = progress.coerceIn(0f, 1f)
+            val angle = p * (PI / 2.0)
+            return cos(angle).toFloat().coerceIn(0f, 1f) to sin(angle).toFloat().coerceIn(0f, 1f)
+        }
+    }
 
     /**
      * 1. SYSTEM AUDIO EFFECTS (Let Dolby / equalizer apps process MyPlayer audio)
@@ -62,14 +80,13 @@ class AudioFeatureManagers @Inject constructor(
     }
 
     /**
-     * 2. PERCEPTUAL SMOOTH FADE-OUT & FADE-IN ENGINE (Zero-Spike Sequential Envelope)
-     * - Keeps the song at normal 1.0f volume throughout playback.
-     * - During the last [fadeSec] seconds of the outgoing song, monotonically eases volume down
-     *   from 1.0f to 0.0f on the main [exoPlayer] using a perceptual smoothstep curve
-     *   (no un-equalized second player, no double-audio summing spike, no early track cut).
-     * - On track transition (`onMediaItemTransition`), immediately locks [exoPlayer.volume] at 0.0f
-     *   before the first audio frame plays, waits until the new track is actually playing and
-     *   advancing, and then monotonically ramps volume from 0.0f up to 1.0f over [fadeSec] seconds.
+     * 2. TRUE EQUAL-POWER OVERLAPPING CROSSFADE ENGINE
+     * - Keeps both the end of the outgoing song and start of the incoming song at normal 1.0f
+     *   combined loudness (`cos^2 + sin^2 == 1.0`) with zero pre-fade dip or silent start.
+     * - When the outgoing track enters the last [fadeSec] seconds, warms up a secondary
+     *   non-focus tail deck (`tailPlayer`) at the exact current position, hands off seamlessly,
+     *   advances the main [exoPlayer] to the incoming track, and runs an equal-power blend once
+     *   both streams are actively producing audio.
      */
     fun attachCrossfadeMonitor(
         scope: CoroutineScope,
@@ -84,15 +101,16 @@ class AudioFeatureManagers @Inject constructor(
         onTriggerNextTrack: (() -> Unit)? = null
     ) {
         crossfadeJob?.cancel()
-        rampInJob?.cancel()
+        overlapJob?.cancel()
+        cleanupTailDeck()
         transitionListener?.let { oldListener ->
             runCatching { attachedPlayer?.removeListener(oldListener) }
         }
         attachedPlayer = exoPlayer
 
-        var isRampingInNewTrack = false
-        var fadingOutMediaId: String? = null
-        var lastFadeOutVol = 1.0f
+        var crossfadeInProgress = false
+        var handledOutgoingKey: String? = null
+        var transitionEpoch = 0L
 
         fun isCrossfadeActive(): Boolean {
             return (isEnabled() || MyPlayerAudioFxDspBridge.crossfadeEnabled) &&
@@ -109,102 +127,10 @@ class AudioFeatureManagers @Inject constructor(
             }
         }
 
-        fun startSmoothFadeInForNewTrack(targetMediaId: String) {
-            rampInJob?.cancel()
-            if (!isCrossfadeActive()) {
-                isRampingInNewTrack = false
-                exoPlayer.volume = 1.0f
-                return
-            }
-
-            // Lock volume at 0.0f immediately before the first sample of the incoming track is heard
-            isRampingInNewTrack = true
-            fadingOutMediaId = null
-            lastFadeOutVol = 1.0f
-            exoPlayer.volume = 0.0f
-
-            rampInJob = scope.launch(Dispatchers.Main.immediate) {
-                try {
-                    // 1. Wait while the incoming track resolves/buffers until sound actually starts advancing
-                    var waitElapsedMs = 0L
-                    var initialPos = -1L
-                    while (isActive && waitElapsedMs < 8_000L) {
-                        if (!isCrossfadeActive()) {
-                            exoPlayer.volume = 1.0f
-                            isRampingInNewTrack = false
-                            return@launch
-                        }
-                        // Keep locked at 0.0f while waiting for playback to begin
-                        if (exoPlayer.volume > 0.01f) {
-                            exoPlayer.volume = 0.0f
-                        }
-                        if (exoPlayer.playbackState == Player.STATE_READY && exoPlayer.isPlaying) {
-                            val pos = exoPlayer.currentPosition
-                            if (initialPos < 0L) {
-                                initialPos = pos
-                            } else if (pos > initialPos || pos > 40L) {
-                                break
-                            }
-                        }
-                        delay(25L)
-                        waitElapsedMs += 25L
-                    }
-
-                    // 2. Smoothly ramp volume from 0.0f ("niche se") up to 1.0f ("normal sound")
-                    val dur = exoPlayer.duration.takeIf { it > 0L } ?: C.TIME_UNSET
-                    val fadeInMs = resolveFadeWindowMs(dur)
-                    var accumulatedPlayMs = 0L
-                    var lastTickMs = SystemClock.elapsedRealtime()
-                    var currentRampVol = 0.0f
-
-                    while (isActive && accumulatedPlayMs < fadeInMs) {
-                        if (!isCrossfadeActive()) {
-                            exoPlayer.volume = 1.0f
-                            isRampingInNewTrack = false
-                            return@launch
-                        }
-                        // Stop ramp-in early if the track already entered its own fade-out window
-                        val trackDur = exoPlayer.duration
-                        val trackPos = exoPlayer.currentPosition
-                        if (trackDur > 12_000L && (trackDur - trackPos) in 1..resolveFadeWindowMs(trackDur)) {
-                            break
-                        }
-
-                        val nowMs = SystemClock.elapsedRealtime()
-                        val deltaMs = (nowMs - lastTickMs).coerceIn(0L, 120L)
-                        lastTickMs = nowMs
-
-                        if (exoPlayer.isPlaying && exoPlayer.playbackState == Player.STATE_READY) {
-                            accumulatedPlayMs += deltaMs
-                            val p = (accumulatedPlayMs.toFloat() / fadeInMs.toFloat()).coerceIn(0f, 1f)
-                            // Perceptual smoothstep * p curve: starts very gently from 0 with zero sudden jump
-                            val smooth = p * p * (3f - 2f * p)
-                            val targetInVol = (smooth * p).coerceIn(0f, 1f)
-                            if (targetInVol > currentRampVol) {
-                                currentRampVol = targetInVol
-                            }
-                            exoPlayer.volume = currentRampVol
-                        }
-                        delay(30L)
-                    }
-
-                    exoPlayer.volume = 1.0f
-                } finally {
-                    isRampingInNewTrack = false
-                }
-            }
-        }
-
         val listener = object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                val newId = mediaItem?.mediaId ?: ""
-                if (isCrossfadeActive() && newId.isNotBlank()) {
-                    startSmoothFadeInForNewTrack(newId)
-                } else {
-                    rampInJob?.cancel()
-                    isRampingInNewTrack = false
-                    fadingOutMediaId = null
-                    lastFadeOutVol = 1.0f
+                transitionEpoch++
+                if (!crossfadeInProgress) {
                     exoPlayer.volume = 1.0f
                 }
             }
@@ -214,17 +140,13 @@ class AudioFeatureManagers @Inject constructor(
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                // If user manually seeks back into the middle of the current track, restore normal volume
                 if (reason == Player.DISCONTINUITY_REASON_SEEK &&
                     oldPosition.mediaItemIndex == newPosition.mediaItemIndex
                 ) {
                     val dur = exoPlayer.duration
                     val fadeWin = resolveFadeWindowMs(dur)
-                    if (dur > 0L && (dur - newPosition.positionMs) > fadeWin) {
-                        rampInJob?.cancel()
-                        isRampingInNewTrack = false
-                        fadingOutMediaId = null
-                        lastFadeOutVol = 1.0f
+                    if (!crossfadeInProgress && dur > 0L && (dur - newPosition.positionMs) > fadeWin) {
+                        handledOutgoingKey = null
                         exoPlayer.volume = 1.0f
                     }
                 }
@@ -235,66 +157,192 @@ class AudioFeatureManagers @Inject constructor(
 
         crossfadeJob = scope.launch(Dispatchers.Main) {
             while (isActive) {
-                delay(35L)
+                delay(50L)
 
                 if (!isCrossfadeActive()) {
-                    if (!isRampingInNewTrack && exoPlayer.volume < 1f) {
-                        exoPlayer.volume = 1f
+                    if (crossfadeInProgress) {
+                        overlapJob?.cancel()
+                        cleanupTailDeck()
+                        crossfadeInProgress = false
                     }
-                    fadingOutMediaId = null
-                    lastFadeOutVol = 1.0f
+                    if (exoPlayer.volume < 1.0f) {
+                        exoPlayer.volume = 1.0f
+                    }
+                    handledOutgoingKey = null
                     continue
                 }
 
-                // While ramping in the new song, let rampInJob own exoPlayer.volume exclusively
-                if (isRampingInNewTrack) {
+                if (crossfadeInProgress) {
                     continue
+                }
+
+                if (exoPlayer.volume < 0.999f) {
+                    exoPlayer.volume = 1.0f
                 }
 
                 if (!exoPlayer.isPlaying || exoPlayer.playbackState != Player.STATE_READY) {
                     continue
                 }
 
+                val triggerNext = onTriggerNextTrack ?: continue
                 val duration = exoPlayer.duration
                 val position = exoPlayer.currentPosition
-                val currentItem = exoPlayer.currentMediaItem
-                val currentMediaId = currentItem?.mediaId ?: ""
+                val currentItem = exoPlayer.currentMediaItem ?: continue
+                val currentMediaId = currentItem.mediaId
+                val outgoingKey = "$transitionEpoch:$currentMediaId"
 
-                if (duration > 12_000L && position > 1_000L && currentItem != null) {
-                    val fadeOutWindowMs = resolveFadeWindowMs(duration)
+                if (duration > 15_000L && position > 2_000L && outgoingKey != handledOutgoingKey) {
+                    val fadeWindowMs = resolveFadeWindowMs(duration)
                     val remainingMs = duration - position
 
-                    if (remainingMs in 1..fadeOutWindowMs) {
-                        if (fadingOutMediaId != currentMediaId) {
-                            fadingOutMediaId = currentMediaId
-                            lastFadeOutVol = exoPlayer.volume.coerceIn(0f, 1f)
-                        }
+                    if (remainingMs in 600L..fadeWindowMs) {
+                        handledOutgoingKey = outgoingKey
+                        crossfadeInProgress = true
 
-                        // Perceptual smooth fade-out: stays at 1.0 entering the window, then eases down to 0.0
-                        val linearRem = (remainingMs.toFloat() / fadeOutWindowMs.toFloat()).coerceIn(0f, 1f)
-                        val smooth = linearRem * linearRem * (3f - 2f * linearRem)
-                        val targetOutVol = if (remainingMs <= 120L) {
-                            0.0f
-                        } else {
-                            (smooth * linearRem).coerceIn(0f, 1f)
-                        }
+                        val capturedEpoch = transitionEpoch
+                        val capturedDuration = duration
+                        val capturedSpeed = exoPlayer.playbackParameters
+                        val capturedAttrs = exoPlayer.audioAttributes
 
-                        // Strict monotonic decrease so position jitter can NEVER cause a volume spike
-                        val appliedVol = minOf(lastFadeOutVol, targetOutVol)
-                        lastFadeOutVol = appliedVol
-                        exoPlayer.volume = appliedVol
-                    } else if (remainingMs > fadeOutWindowMs + 400L) {
-                        fadingOutMediaId = null
-                        lastFadeOutVol = 1.0f
-                        if (exoPlayer.volume < 1.0f) {
-                            exoPlayer.volume = 1.0f
+                        overlapJob?.cancel()
+                        overlapJob = scope.launch(Dispatchers.Main.immediate) {
+                            try {
+                                val mediaSourceFactory = if (dataSourceFactory != null) {
+                                    DefaultMediaSourceFactory(dataSourceFactory)
+                                } else {
+                                    DefaultMediaSourceFactory(context)
+                                }
+                                val deck = ExoPlayer.Builder(
+                                    context,
+                                    DefaultRenderersFactory(context).setEnableDecoderFallback(true)
+                                )
+                                    .setMediaSourceFactory(mediaSourceFactory)
+                                    .setAudioAttributes(capturedAttrs, /* handleAudioFocus = */ false)
+                                    .build()
+                                tailPlayer = deck
+
+                                val handoffPos = (exoPlayer.currentPosition + 80L)
+                                    .coerceAtMost((capturedDuration - 400L).coerceAtLeast(0L))
+                                deck.playbackParameters = capturedSpeed
+                                deck.volume = 0.0f
+                                deck.setMediaItem(currentItem, handoffPos)
+                                deck.prepare()
+                                deck.play()
+
+                                // Warm up tail deck silently while main player keeps playing at full 1.0f
+                                var warmWaitMs = 0L
+                                var tailReady = false
+                                while (isActive && warmWaitMs < 1_200L) {
+                                    if (!isCrossfadeActive() || !exoPlayer.playWhenReady || transitionEpoch != capturedEpoch) {
+                                        return@launch
+                                    }
+                                    if (deck.playbackState == Player.STATE_READY &&
+                                        deck.isPlaying &&
+                                        deck.currentPosition >= (handoffPos - 150L).coerceAtLeast(0L)
+                                    ) {
+                                        tailReady = true
+                                        break
+                                    }
+                                    delay(20L)
+                                    warmWaitMs += 20L
+                                }
+
+                                if (!tailReady) {
+                                    // Could not prepare tail deck cleanly — keep main player at 1.0f (never drop to silence)
+                                    return@launch
+                                }
+
+                                // Instant handoff: tail deck keeps outgoing track at full 1.0f while main player loads next track
+                                deck.volume = 1.0f
+                                exoPlayer.volume = 0.0f
+                                triggerNext.invoke()
+
+                                // Wait until incoming track on main player is ready and actually advancing frames
+                                val tailDur = deck.duration.takeIf { it > 0L } ?: capturedDuration
+                                var incomingEpoch: Long? = null
+                                var incomingInitialPos = -1L
+                                var incomingReady = false
+                                var waitIncomingMs = 0L
+                                while (isActive && waitIncomingMs < 6_000L) {
+                                    if (!isCrossfadeActive() || deck.playbackState == Player.STATE_ENDED) {
+                                        break
+                                    }
+                                    if (transitionEpoch != capturedEpoch) {
+                                        if (incomingEpoch == null) {
+                                            incomingEpoch = transitionEpoch
+                                        } else if (transitionEpoch != incomingEpoch) {
+                                            // User manually skipped again during transition
+                                            return@launch
+                                        }
+                                        if (exoPlayer.playbackState == Player.STATE_READY && exoPlayer.isPlaying) {
+                                            val pos = exoPlayer.currentPosition
+                                            if (incomingInitialPos < 0L) {
+                                                incomingInitialPos = pos
+                                            } else if (pos > incomingInitialPos || pos > 30L) {
+                                                incomingReady = true
+                                                break
+                                            }
+                                        }
+                                    }
+                                    delay(20L)
+                                    waitIncomingMs += 20L
+                                }
+
+                                if (!incomingReady) {
+                                    // No next track or delayed arrival — let tail finish cleanly at full volume
+                                    while (isActive && deck.isPlaying && deck.playbackState == Player.STATE_READY && isCrossfadeActive()) {
+                                        if (incomingEpoch != null && transitionEpoch != incomingEpoch) return@launch
+                                        if (transitionEpoch != capturedEpoch &&
+                                            exoPlayer.playbackState == Player.STATE_READY &&
+                                            exoPlayer.isPlaying &&
+                                            exoPlayer.currentPosition > 20L
+                                        ) {
+                                            incomingReady = true
+                                            break
+                                        }
+                                        if ((tailDur - deck.currentPosition) <= 100L) break
+                                        delay(35L)
+                                    }
+                                    if (!incomingReady) return@launch
+                                }
+
+                                val activeEpoch = incomingEpoch ?: transitionEpoch
+                                val tailRemainingMs = (tailDur - deck.currentPosition).coerceAtLeast(0L)
+                                val overlapDurationMs = tailRemainingMs.coerceIn(900L, fadeWindowMs)
+                                val overlapStartRealtime = SystemClock.elapsedRealtime()
+
+                                while (isActive) {
+                                    if (!isCrossfadeActive() || !exoPlayer.isPlaying || transitionEpoch != activeEpoch) {
+                                        return@launch
+                                    }
+                                    val elapsedMs = SystemClock.elapsedRealtime() - overlapStartRealtime
+                                    val progress = (elapsedMs.toFloat() / overlapDurationMs.toFloat()).coerceIn(0f, 1f)
+                                    val (outVol, inVol) = equalPowerGains(progress)
+                                    deck.volume = outVol
+                                    exoPlayer.volume = inVol
+                                    if (progress >= 1f || deck.playbackState == Player.STATE_ENDED) {
+                                        break
+                                    }
+                                    delay(25L)
+                                }
+                            } finally {
+                                cleanupTailDeck()
+                                exoPlayer.volume = 1.0f
+                                crossfadeInProgress = false
+                            }
                         }
                     }
-                } else if (exoPlayer.volume < 1.0f && fadingOutMediaId == null) {
-                    exoPlayer.volume = 1.0f
                 }
             }
         }
+    }
+
+    private fun cleanupTailDeck() {
+        runCatching {
+            tailPlayer?.stop()
+            tailPlayer?.release()
+        }
+        tailPlayer = null
     }
 
     /**
@@ -343,8 +391,9 @@ class AudioFeatureManagers @Inject constructor(
     }
 
     fun release() {
-        rampInJob?.cancel()
-        rampInJob = null
+        overlapJob?.cancel()
+        overlapJob = null
+        cleanupTailDeck()
         crossfadeJob?.cancel()
         crossfadeJob = null
         transitionListener?.let { oldListener ->

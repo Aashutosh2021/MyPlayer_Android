@@ -66,6 +66,8 @@ class MusicService : MediaSessionService() {
     @Inject
     lateinit var bitPerfectUsbController: BitPerfectUsbController
     @Inject
+    lateinit var audioOutputRouterManager: AudioOutputRouterManager
+    @Inject
     lateinit var mixAnalyzer: com.myplayer.app.playback.mix.MixAnalyzer
 
     @Volatile private var currentAudioPlaybackState = AudioPlaybackState()
@@ -239,13 +241,17 @@ class MusicService : MediaSessionService() {
 
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
                 super.onAudioSessionIdChanged(audioSessionId)
-                if (currentAudioPlaybackState.systemAudioEffects) {
-                    audioFeatureManagers.toggleSystemAudioEffects(audioSessionId, true)
-                }
+                // Do not attach global system audio effects when Multi-Output Split routing is active
+                val allowSystemFx = currentAudioPlaybackState.systemAudioEffects &&
+                    !audioOutputRouterManager.isSplitRoutingActive
+                audioFeatureManagers.toggleSystemAudioEffects(audioSessionId, allowSystemFx)
                 serviceScope.launch {
                     val config = audioSettingsRepository.configFlow.firstOrNull()
                     if (config != null) {
-                        updateLoudnessEnhancer(config.loudnessNormalize, config.loudnessGainMb)
+                        updateLoudnessEnhancer(
+                            enabled = config.loudnessNormalize && !audioOutputRouterManager.isSplitRoutingActive,
+                            gainMb = config.loudnessGainMb
+                        )
                     }
                 }
             }
@@ -292,7 +298,8 @@ class MusicService : MediaSessionService() {
                 currentAudioPlaybackState = state
                 masterAudioDspProcessor.updateState(state)
                 bitPerfectUsbController.setBitPerfectEnabled(state.bitPerfectMode || state.usbExclusiveOutput)
-                audioFeatureManagers.toggleSystemAudioEffects(player.audioSessionId, state.systemAudioEffects)
+                val allowSystemFx = state.systemAudioEffects && !audioOutputRouterManager.isSplitRoutingActive
+                audioFeatureManagers.toggleSystemAudioEffects(player.audioSessionId, allowSystemFx)
                 spatialAudioProcessor.updateParams(
                     SpatialParams(
                         enabled = state.spatialAudioEnabled,
@@ -340,7 +347,10 @@ class MusicService : MediaSessionService() {
                     width = config.spatialWidth
                 )
 
-                updateLoudnessEnhancer(config.loudnessNormalize, config.loudnessGainMb)
+                updateLoudnessEnhancer(
+                    enabled = config.loudnessNormalize && !audioOutputRouterManager.isSplitRoutingActive,
+                    gainMb = config.loudnessGainMb
+                )
             }
         }
     }

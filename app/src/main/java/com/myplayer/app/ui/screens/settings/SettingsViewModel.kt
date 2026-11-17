@@ -71,7 +71,8 @@ class SettingsViewModel @Inject constructor(
     val localCastManager: LocalCastManager,
     val audioOutputRouterManager: com.myplayer.app.playback.AudioOutputRouterManager,
     val shazamRecognizer: ShazamRecognizer,
-    val musicController: MusicController
+    val musicController: MusicController,
+    private val innertubeApi: com.myplayer.app.data.online.InnertubeApi
 ) : ViewModel() {
 
     val audioConfig = audioSettingsRepository.configFlow
@@ -355,6 +356,26 @@ class SettingsViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 _restoreState.value = BackupRestoreState.Error(e.message ?: "Failed to restore backup file")
+            }
+        }
+    }
+
+    fun playRecognizedSong(title: String, artist: String, coverUrl: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val query = "$title $artist".trim()
+            val found = runCatching {
+                innertubeApi.search(query, filtered = true).songs.firstOrNull()
+                    ?: innertubeApi.search(query, filtered = false).songs.firstOrNull()
+            }.getOrNull()
+            if (found != null) {
+                val track = if (found.thumbnailUrl.isBlank() && !coverUrl.isNullOrBlank()) {
+                    found.copy(thumbnailUrl = coverUrl)
+                } else {
+                    found
+                }
+                withContext(Dispatchers.Main) {
+                    musicController.playOnlineSong(track)
+                }
             }
         }
     }

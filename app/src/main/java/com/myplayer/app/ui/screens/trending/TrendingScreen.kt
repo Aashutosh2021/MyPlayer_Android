@@ -154,7 +154,7 @@ fun TrendingScreen(
         )
     }
 
-    if (showRecognizeDialog) {
+    if (com.myplayer.app.BuildConfig.DEBUG && showRecognizeDialog) {
         OpenTuneRecognizeDialog(
             shazamRecognizer = viewModel.shazamRecognizer,
             onPlayMatchedSong = { title, artist, coverUrl ->
@@ -600,14 +600,16 @@ fun TrendingScreen(
                     // 1. Quick Feature Hub Cards (Recognize | Together | DualBud)
                     item(span = StaggeredGridItemSpan.FullLine, key = "quick_feature_hub") {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ExploreFeatureActionCard(
-                                icon = Icons.Filled.GraphicEq,
-                                title = "Recognize",
-                                subtitle = "Identify any song",
-                                accent = Color(0xFF8B5CF6),
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = { showRecognizeDialog = true }
-                            )
+                            if (com.myplayer.app.BuildConfig.DEBUG) {
+                                ExploreFeatureActionCard(
+                                    icon = Icons.Filled.GraphicEq,
+                                    title = "Recognize",
+                                    subtitle = "Identify any song",
+                                    accent = Color(0xFF8B5CF6),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = { showRecognizeDialog = true }
+                                )
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)

@@ -1,6 +1,5 @@
 package com.myplayer.app.data.recognize
 
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -23,13 +22,13 @@ class ShazamRecognizerTest {
 
     @Test
     fun signatureMatchesShazamBinaryFormat() {
-        val sig = ShazamBinarySignature()
+        val sig = OpenTuneShazamSignature()
         val pcm = melody(6)
         var i = 0
         var chunk = 1000
         while (i < pcm.size) {
             val piece = pcm.copyOfRange(i, minOf(pcm.size, i + chunk))
-            sig.addSamples(piece)
+            sig.add(piece)
             i += piece.size
             chunk = if (chunk == 1000) 777 else 1000
         }
@@ -62,26 +61,25 @@ class ShazamRecognizerTest {
 
     @Test
     fun silenceGeneratesZeroPeaks() {
-        val sig = ShazamBinarySignature()
-        sig.addSamples(ShortArray(16_000 * 3))
+        val sig = OpenTuneShazamSignature()
+        sig.add(ShortArray(16_000 * 3))
         assertEquals(0, sig.peakCount)
     }
 
     @Test
     fun parseShazamJsonExtractsTrackMetadata() {
-        val recognizer = ShazamRecognizer(OkHttpClient())
         val json = """
             {"matches":[{"id":"1"}],"track":{"title":"Never Gonna Give You Up","subtitle":"Rick Astley",
              "url":"https://www.shazam.com/track/1/never-gonna-give-you-up",
              "images":{"coverart":"https://img/400.jpg","coverarthq":"https://img/hq.jpg"},
              "sections":[{"type":"SONG","metadata":[{"title":"Album","text":"Whenever You Need Somebody"}]}]}}
         """.trimIndent()
-        val song = recognizer.parseShazamJson(json)!!
+        val song = ShazamRecognizer.parseShazamJson(json)!!
         assertEquals("Never Gonna Give You Up", song.title)
         assertEquals("Rick Astley", song.artist)
         assertEquals("Whenever You Need Somebody", song.album)
         assertEquals("https://img/hq.jpg", song.coverUrl)
         assertEquals("https://www.shazam.com/track/1/never-gonna-give-you-up", song.shazamUrl)
-        assertNull(recognizer.parseShazamJson("""{"matches":[],"tagid":"x"}"""))
+        assertNull(ShazamRecognizer.parseShazamJson("""{"matches":[],"tagid":"x"}"""))
     }
 }

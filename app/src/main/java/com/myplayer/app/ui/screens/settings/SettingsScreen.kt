@@ -402,7 +402,7 @@ fun SettingsScreen(
         )
     }
 
-    if (showMultiOutputStudioDialog) {
+    if (com.myplayer.app.BuildConfig.DEBUG && showMultiOutputStudioDialog) {
         OpenTuneMultiOutputStudioDialog(
             routerManager = viewModel.audioOutputRouterManager,
             onOpenDlnaCast = { showCastDialog = true },
@@ -420,11 +420,12 @@ fun SettingsScreen(
         )
     }
 
-    if (showRecognizeDialog) {
+    if (com.myplayer.app.BuildConfig.DEBUG && showRecognizeDialog) {
         OpenTuneRecognizeDialog(
             shazamRecognizer = viewModel.shazamRecognizer,
-            onPlayMatchedSong = { title, artist, _ ->
-                Toast.makeText(context, "Matched: $title — $artist", Toast.LENGTH_SHORT).show()
+            onPlayMatchedSong = { title, artist, coverUrl ->
+                Toast.makeText(context, "Playing: $title — $artist", Toast.LENGTH_SHORT).show()
+                viewModel.playRecognizedSong(title, artist, coverUrl)
             },
             onDismiss = { showRecognizeDialog = false }
         )
@@ -975,7 +976,7 @@ fun SettingsScreen(
     }
 
     // Build all searchable setting entries across every category
-    val allEntries: List<SearchableSettingEntry> = listOf(
+    val allEntries: List<SearchableSettingEntry> = listOfNotNull(
         // 1. Account & integrations
         SearchableSettingEntry(
             categoryKey = "account",
@@ -1121,7 +1122,7 @@ fun SettingsScreen(
                 )
             }
         ),
-        SearchableSettingEntry(
+        if (com.myplayer.app.BuildConfig.DEBUG) SearchableSettingEntry(
             categoryKey = "account",
             categoryTitle = "Account & integrations",
             groupTitle = "Listen together & multi-device",
@@ -1135,7 +1136,7 @@ fun SettingsScreen(
                     onClick = { showMultiOutputStudioDialog = true }
                 )
             }
-        ),
+        ) else null,
 
         // 2. Listening history & Replay
         SearchableSettingEntry(
@@ -1153,7 +1154,7 @@ fun SettingsScreen(
                 )
             }
         ),
-        SearchableSettingEntry(
+        if (com.myplayer.app.BuildConfig.DEBUG) SearchableSettingEntry(
             categoryKey = "history",
             categoryTitle = "Listening history & Replay",
             groupTitle = "Discovery tools",
@@ -1167,7 +1168,7 @@ fun SettingsScreen(
                     onClick = { showRecognizeDialog = true }
                 )
             }
-        ),
+        ) else null,
 
         // 3. Sound and quality
         SearchableSettingEntry(
@@ -1186,7 +1187,7 @@ fun SettingsScreen(
                 )
             }
         ),
-        SearchableSettingEntry(
+        if (com.myplayer.app.BuildConfig.DEBUG) SearchableSettingEntry(
             categoryKey = "audio",
             categoryTitle = "Sound and quality",
             groupTitle = "Equalizer & headphone correction",
@@ -1200,7 +1201,7 @@ fun SettingsScreen(
                     onClick = { showMultiOutputStudioDialog = true }
                 )
             }
-        ),
+        ) else null,
         SearchableSettingEntry(
             categoryKey = "audio",
             categoryTitle = "Sound and quality",

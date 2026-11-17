@@ -160,7 +160,7 @@ fun NowPlayingScreen(
         )
     }
 
-    if (showMultiOutputStudio) {
+    if (com.myplayer.app.BuildConfig.DEBUG && showMultiOutputStudio) {
         com.myplayer.app.ui.opentune.OpenTuneMultiOutputStudioDialog(
             onDismiss = { showMultiOutputStudio = false }
         )
@@ -373,11 +373,13 @@ fun NowPlayingScreen(
                         leadingIcon = { Icon(Icons.Filled.Timer, null, tint = MaterialTheme.colorScheme.onSurface) },
                         onClick = { showMoreSheet = false; showSleepTimer = true }
                     )
-                    DropdownMenuItem(
-                        text = { Text("Multi-Output & Separate Sound (Speaker / Buds)", color = MaterialTheme.colorScheme.onSurface) },
-                        leadingIcon = { Icon(Icons.Filled.Speaker, null, tint = MaterialTheme.colorScheme.primary) },
-                        onClick = { showMoreSheet = false; showMultiOutputStudio = true }
-                    )
+                    if (com.myplayer.app.BuildConfig.DEBUG) {
+                        DropdownMenuItem(
+                            text = { Text("Multi-Output & Separate Sound (Speaker / Buds)", color = MaterialTheme.colorScheme.onSurface) },
+                            leadingIcon = { Icon(Icons.Filled.Speaker, null, tint = MaterialTheme.colorScheme.primary) },
+                            onClick = { showMoreSheet = false; showMultiOutputStudio = true }
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Audio Quality (${audioQuality.displayBadge})", color = MaterialTheme.colorScheme.onSurface) },
                         leadingIcon = { Icon(Icons.Filled.GraphicEq, null, tint = MaterialTheme.colorScheme.onSurface) },

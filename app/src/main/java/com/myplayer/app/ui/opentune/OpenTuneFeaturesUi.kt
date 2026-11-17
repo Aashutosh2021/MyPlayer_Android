@@ -116,6 +116,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -153,6 +154,7 @@ import com.myplayer.app.cast.LocalCastManager
 import com.myplayer.app.data.local.entity.SongEntity
 import com.myplayer.app.data.online.model.OnlineSong
 import com.myplayer.app.data.recommendation.model.RecommendationSong
+import com.myplayer.app.data.recognize.RecognizerUiState
 import com.myplayer.app.data.recognize.RecognizedSong
 import com.myplayer.app.data.recognize.ShazamRecognizer
 import com.myplayer.app.data.sponsorblock.SponsorBlockManager
@@ -1452,37 +1454,32 @@ fun OpenTuneRecognizeDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var isListening by remember { mutableStateOf(false) }
-    var matchedSong by remember { mutableStateOf<RecognizedSong?>(null) }
-    var statusText by remember { mutableStateOf("Tap the orb to identify music playing around you") }
-    var historyList by remember { mutableStateOf<List<RecognizedSong>>(emptyList()) }
+    val recState by shazamRecognizer.state.collectAsState()
+    val historyList by shazamRecognizer.history.collectAsState()
 
-    fun startRecognition() {
-        if (isListening) return
-        isListening = true
-        matchedSong = null
-        statusText = "Listening to music nearby... Hold phone closer to the speaker"
-        scope.launch {
-            val result = runCatching {
-                shazamRecognizer.recognizeFromMicrophone(maxDurationSeconds = 14) { _, secs ->
-                    if (isListening && secs >= 1f) {
-                        statusText = "Listening... ${secs.toInt()}s"
-                    }
-                }
-            }
-            isListening = false
-            result.onSuccess { song ->
-                if (song != null) {
-                    matchedSong = song
-                    historyList = (listOf(song) + historyList).distinctBy { "${it.title}_${it.artist}" }.take(15)
-                    statusText = "Match found!"
-                } else {
-                    statusText = "Couldn't catch that song. Make sure music is audible and tap to try again."
-                }
-            }.onFailure { err ->
-                statusText = err.message?.takeIf { it.isNotBlank() }
-                    ?: "Recognition failed. Check microphone & internet connection."
+    val isListening = recState is RecognizerUiState.Listening
+    val listeningLevel = (recState as? RecognizerUiState.Listening)?.level ?: 0f
+    val listeningSeconds = (recState as? RecognizerUiState.Listening)?.seconds ?: 0f
+    val listeningPeaks = (recState as? RecognizerUiState.Listening)?.peaksCount ?: 0
+    val matchedSong = (recState as? RecognizerUiState.Found)?.song
+
+    val statusText = when (val st = recState) {
+        is RecognizerUiState.Idle ->
+            "Tap the orb to identify music playing around you (3s–12s Shazam fingerprinting)"
+        is RecognizerUiState.Listening ->
+            "Listening (${st.seconds.toInt()}s) • ${st.peaksCount} acoustic peaks captured... Hold phone near audio source"
+        is RecognizerUiState.Found ->
+            "Match found: ${st.song.title} — ${st.song.artist}"
+        is RecognizerUiState.NotFound ->
+            "Couldn't catch that song. Hold phone closer to the speaker and tap the orb to try again."
+        is RecognizerUiState.Failed ->
+            st.reason
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (shazamRecognizer.state.value is RecognizerUiState.Listening) {
+                shazamRecognizer.cancelListening()
             }
         }
     }
@@ -1491,28 +1488,29 @@ fun OpenTuneRecognizeDialog(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startRecognition()
-        } else {
-            statusText = "Microphone permission is required to identify songs."
+            shazamRecognizer.startListening()
         }
     }
 
     val pulseTransition = rememberInfiniteTransition(label = "shazamPulse")
     val ring1 by pulseTransition.animateFloat(
         initialValue = 1.0f,
-        targetValue = 1.55f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart),
+        targetValue = 1.6f,
+        animationSpec = infiniteRepeatable(tween(1300, easing = LinearEasing), RepeatMode.Restart),
         label = "ring1"
     )
     val ring2 by pulseTransition.animateFloat(
         initialValue = 1.0f,
-        targetValue = 1.85f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart),
+        targetValue = 1.9f,
+        animationSpec = infiniteRepeatable(tween(1750, easing = LinearEasing), RepeatMode.Restart),
         label = "ring2"
     )
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            shazamRecognizer.cancelListening()
+            onDismiss()
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
@@ -1530,44 +1528,56 @@ fun OpenTuneRecognizeDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = {
+                        shazamRecognizer.cancelListening()
+                        onDismiss()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "What's this song?",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "What's this song?",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "OpenTune Shazam Audio Fingerprint Engine",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
-                Spacer(Modifier.height(36.dp))
+                Spacer(Modifier.height(28.dp))
 
-                // Pulsing Shazam / OpenTune Orb Stage
+                // Pulsing Shazam / OpenTune Orb Stage with Live Mic Level Reactivity
                 Box(
-                    modifier = Modifier.size(220.dp),
+                    modifier = Modifier.size(224.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     if (isListening) {
                         val primaryColor = MaterialTheme.colorScheme.primary
+                        val boost = 1f + (listeningLevel * 0.35f)
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             val baseRadius = size.minDimension / 3.4f
                             drawCircle(
-                                color = primaryColor.copy(alpha = (1.55f - ring1).coerceIn(0f, 0.35f)),
-                                radius = baseRadius * ring1,
-                                style = Stroke(width = 3.dp.toPx())
+                                color = primaryColor.copy(alpha = (1.6f - ring1).coerceIn(0f, 0.42f)),
+                                radius = baseRadius * ring1 * boost,
+                                style = Stroke(width = 3.5.dp.toPx())
                             )
                             drawCircle(
-                                color = primaryColor.copy(alpha = (1.85f - ring2).coerceIn(0f, 0.25f)),
-                                radius = baseRadius * ring2,
+                                color = primaryColor.copy(alpha = (1.9f - ring2).coerceIn(0f, 0.28f)),
+                                radius = baseRadius * ring2 * boost,
                                 style = Stroke(width = 2.dp.toPx())
                             )
                         }
                     }
 
+                    val orbSize = if (isListening) (132 + (listeningLevel * 18f).toInt()).dp else 132.dp
                     Box(
                         modifier = Modifier
-                            .size(132.dp)
+                            .size(orbSize)
                             .shadow(18.dp, CircleShape)
                             .clip(CircleShape)
                             .background(
@@ -1579,12 +1589,14 @@ fun OpenTuneRecognizeDialog(
                                 )
                             )
                             .clickable {
-                                if (ContextCompat.checkSelfPermission(
+                                if (isListening) {
+                                    shazamRecognizer.cancelListening()
+                                } else if (ContextCompat.checkSelfPermission(
                                         context,
                                         Manifest.permission.RECORD_AUDIO
                                     ) == PackageManager.PERMISSION_GRANTED
                                 ) {
-                                    startRecognition()
+                                    shazamRecognizer.startListening()
                                 } else {
                                     micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
@@ -1593,17 +1605,23 @@ fun OpenTuneRecognizeDialog(
                     ) {
                         Icon(
                             imageVector = if (isListening) Icons.Filled.GraphicEq else Icons.Filled.Mic,
-                            contentDescription = "Listen",
+                            contentDescription = if (isListening) "Stop Listening" else "Listen",
                             tint = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(54.dp)
                         )
                     }
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(16.dp))
 
                 Text(
-                    text = if (isListening) "Listening..." else "Tap to Recognize",
+                    text = when (recState) {
+                        is RecognizerUiState.Listening -> "Listening... ${listeningSeconds.toInt()}s (Tap orb to stop)"
+                        is RecognizerUiState.Found -> "Song Identified!"
+                        is RecognizerUiState.NotFound -> "No Match — Tap Orb to Retry"
+                        is RecognizerUiState.Failed -> "Tap Orb to Retry"
+                        else -> "Tap to Recognize"
+                    },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1614,10 +1632,25 @@ fun OpenTuneRecognizeDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 24.dp)
+                    modifier = Modifier.padding(horizontal = 20.dp)
                 )
 
-                Spacer(Modifier.height(24.dp))
+                if (isListening) {
+                    Spacer(Modifier.height(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest
+                    ) {
+                        Text(
+                            text = "Mic Level ${(listeningLevel * 100).toInt()}% • $listeningPeaks Fingerprint Peaks",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
 
                 // Matched Song Card
                 AnimatedVisibility(visible = matchedSong != null) {
@@ -1660,6 +1693,15 @@ fun OpenTuneRecognizeDialog(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                        if (!found.album.isNullOrBlank()) {
+                                            Text(
+                                                text = found.album,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                                 Spacer(Modifier.height(14.dp))
@@ -1681,7 +1723,7 @@ fun OpenTuneRecognizeDialog(
                 }
 
                 if (historyList.isNotEmpty()) {
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(18.dp))
                     Text(
                         text = "RECENTLY RECOGNIZED",
                         style = MaterialTheme.typography.labelMedium,
@@ -2372,7 +2414,8 @@ fun OpenTuneMultiOutputStudioDialog(
     val state by manager.state.collectAsState()
 
     LaunchedEffect(Unit) {
-        manager.refreshConnectedDevicesAndApplyRouting()
+        // Non-disruptive refresh (forceReapply = false) so opening the dialog never glitches audio
+        manager.refreshConnectedDevicesAndApplyRouting(forceReapply = false)
     }
 
     Dialog(
@@ -2421,7 +2464,7 @@ fun OpenTuneMultiOutputStudioDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = { manager.refreshConnectedDevicesAndApplyRouting() }) {
+                    IconButton(onClick = { manager.refreshConnectedDevicesAndApplyRouting(forceReapply = true) }) {
                         Icon(
                             imageVector = Icons.Filled.Refresh,
                             contentDescription = "Refresh Devices",
@@ -2441,7 +2484,7 @@ fun OpenTuneMultiOutputStudioDialog(
                         .weight(1f),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
-                    // Active Route Status Card
+                    // Active Route Status Card + 1-Tap Anti-ZigZag Stream Resync
                     item {
                         Surface(
                             modifier = Modifier
@@ -2477,11 +2520,79 @@ fun OpenTuneMultiOutputStudioDialog(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                if (state.activeScenario != com.myplayer.app.playback.MultiOutputScenario.DEFAULT_SYSTEM ||
+                                    state.pinnedDeviceId != null
+                                ) {
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable { manager.resyncExternalAudioStreams(silent = false) }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Refresh,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    text = "Sync Streams (Fix Stutter)",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onPrimary
+                                                )
+                                            }
+                                        }
+                                        if (state.activeScenario == com.myplayer.app.playback.MultiOutputScenario.SCENARIO_1_MYPLAYER_BT_REELS_PHONE) {
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = MaterialTheme.colorScheme.tertiary,
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .clickable { manager.openSystemMediaOutputSwitcher(context) }
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Speaker,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.onTertiary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "Reels -> Phone Speaker",
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onTertiary
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // 1. Simultaneous Playback & Independent App Volume
+                    // 1. Simultaneous Playback, Anti-ZigZag Auto-Sync & Independent App Volume
                     item { OpenTuneGroupLabel("Simultaneous Playback & App Volume") }
                     item {
                         OpenTuneGroupCard {
@@ -2491,6 +2602,14 @@ fun OpenTuneMultiOutputStudioDialog(
                                 icon = Icons.Filled.PlayArrow,
                                 checked = state.ignoreAudioFocus,
                                 onChange = { manager.setIgnoreAudioFocus(it) }
+                            )
+                            OpenTuneRowDivider()
+                            OpenTuneToggleRow(
+                                title = "Auto-Sync External Stream (Fix Startup Zig-Zag)",
+                                summary = "Automatically performs a 180ms stream handshake when YouTube/Reels is playing so audio starts smooth & continuous",
+                                icon = Icons.Filled.Equalizer,
+                                checked = state.autoSyncExternalStream,
+                                onChange = { manager.setAutoSyncExternalStream(it) }
                             )
                             OpenTuneRowDivider()
                             Column(
@@ -2568,7 +2687,7 @@ fun OpenTuneMultiOutputStudioDialog(
                         items = com.myplayer.app.playback.MultiOutputScenario.entries,
                         key = { it.id }
                     ) { scenario ->
-                        val selected = state.activeScenario == scenario && state.pinnedDeviceId == null
+                        val selected = state.activeScenario == scenario
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2584,63 +2703,166 @@ fun OpenTuneMultiOutputStudioDialog(
                                 else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
                             )
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(horizontal = 16.dp, vertical = 14.dp)
                             ) {
-                                Icon(
-                                    imageVector = when (scenario) {
-                                        com.myplayer.app.playback.MultiOutputScenario.DEFAULT_SYSTEM -> Icons.Filled.Equalizer
-                                        com.myplayer.app.playback.MultiOutputScenario.SCENARIO_1_MYPLAYER_BT_REELS_PHONE -> Icons.Filled.Headphones
-                                        com.myplayer.app.playback.MultiOutputScenario.SCENARIO_2_MYPLAYER_SPEAKER_REELS_EARBUDS -> Icons.Filled.Speaker
-                                        com.myplayer.app.playback.MultiOutputScenario.SCENARIO_3_DUAL_EXTERNAL_SINKS -> Icons.Filled.Cast
-                                    },
-                                    contentDescription = null,
-                                    tint = if (selected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(Modifier.width(14.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = scenario.title,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.weight(1f, fill = false)
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(999.dp),
-                                            color = if (selected) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.surfaceContainerHighest
-                                        ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = when (scenario) {
+                                            com.myplayer.app.playback.MultiOutputScenario.DEFAULT_SYSTEM -> Icons.Filled.Equalizer
+                                            com.myplayer.app.playback.MultiOutputScenario.SCENARIO_1_MYPLAYER_BT_REELS_PHONE -> Icons.Filled.Headphones
+                                            com.myplayer.app.playback.MultiOutputScenario.SCENARIO_2_MYPLAYER_SPEAKER_REELS_EARBUDS -> Icons.Filled.Speaker
+                                            com.myplayer.app.playback.MultiOutputScenario.SCENARIO_3_DUAL_EXTERNAL_SINKS -> Icons.Filled.Cast
+                                        },
+                                        contentDescription = null,
+                                        tint = if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
-                                                text = scenario.badge,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (selected) MaterialTheme.colorScheme.onPrimary
-                                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                                text = scenario.title,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(1f, fill = false)
                                             )
+                                            Spacer(Modifier.width(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(999.dp),
+                                                color = if (selected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.surfaceContainerHighest
+                                            ) {
+                                                Text(
+                                                    text = scenario.badge,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            text = scenario.subtitle,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (selected) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Icon(
+                                            imageVector = Icons.Filled.CheckCircle,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+
+                                // Scenario 1 inline helper actions: switch YouTube/Reels to Phone Speaker while Route Guardian keeps MyPlayer on Bluetooth
+                                if (selected && scenario == com.myplayer.app.playback.MultiOutputScenario.SCENARIO_1_MYPLAYER_BT_REELS_PHONE) {
+                                    Spacer(Modifier.height(10.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Text(
+                                                text = "Step 2 for Scenario 1: Route YouTube/Reels to Phone Speaker",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(Modifier.height(2.dp))
+                                            Text(
+                                                text = "MyPlayer is locked to Bluetooth! Tap below and select 'This Phone / Phone Speaker' so YouTube & Reels come out of your Phone Speaker while MyPlayer stays on Bluetooth:",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(Modifier.height(8.dp))
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Button(
+                                                    onClick = { manager.openSystemMediaOutputSwitcher(context) },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Text("Set Reels -> Phone", style = MaterialTheme.typography.labelMedium)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { manager.openOemSeparateAppSoundSettings(context) },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Text("OEM Separate Sound", style = MaterialTheme.typography.labelMedium)
+                                                }
+                                            }
                                         }
                                     }
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        text = scenario.subtitle,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
-                                if (selected) {
-                                    Spacer(Modifier.width(8.dp))
-                                    Icon(
-                                        imageVector = Icons.Filled.CheckCircle,
-                                        contentDescription = "Selected",
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
+
+                                // Scenario 3 inline target speaker selector when multiple devices are connected
+                                if (selected && scenario == com.myplayer.app.playback.MultiOutputScenario.SCENARIO_3_DUAL_EXTERNAL_SINKS && state.connectedDevices.isNotEmpty()) {
+                                    Spacer(Modifier.height(10.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Text(
+                                                text = "Choose Speaker for MyPlayer (Earbuds stay on Reels/YouTube):",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(Modifier.height(6.dp))
+                                            state.connectedDevices.forEach { dev ->
+                                                val devPinned = dev.isPinnedByMyPlayer
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 3.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(
+                                                            if (devPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                                            else MaterialTheme.colorScheme.surfaceContainer
+                                                        )
+                                                        .clickable {
+                                                            manager.pinSpecificDevice(
+                                                                dev,
+                                                                keepScenario = com.myplayer.app.playback.MultiOutputScenario.SCENARIO_3_DUAL_EXTERNAL_SINKS
+                                                            )
+                                                        }
+                                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (dev.isLikelySpeaker) Icons.Filled.Speaker else Icons.Filled.Headphones,
+                                                        contentDescription = null,
+                                                        tint = if (devPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text(
+                                                        text = dev.productName,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontWeight = if (devPinned) FontWeight.Bold else FontWeight.Medium,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    Text(
+                                                        text = if (devPinned) "MyPlayer Speaker" else "Use for MyPlayer",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = if (devPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2689,12 +2911,7 @@ fun OpenTuneMultiOutputStudioDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        imageVector = when (device.category) {
-                                            com.myplayer.app.playback.OutputDeviceCategory.BLUETOOTH_A2DP,
-                                            com.myplayer.app.playback.OutputDeviceCategory.BLUETOOTH_LE,
-                                            com.myplayer.app.playback.OutputDeviceCategory.WIRED_AUX_HEADPHONES -> Icons.Filled.Headphones
-                                            else -> Icons.Filled.Speaker
-                                        },
+                                        imageVector = if (device.isLikelySpeaker) Icons.Filled.Speaker else Icons.Filled.Headphones,
                                         contentDescription = null,
                                         tint = if (isPinned) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.onSurfaceVariant
@@ -2740,8 +2957,8 @@ fun OpenTuneMultiOutputStudioDialog(
                     item {
                         OpenTuneGroupCard {
                             OpenTuneNavRow(
-                                title = "System Media Output Switcher",
-                                summary = "Switch Instagram Reels / Movie output between Phone Speaker and Bluetooth",
+                                title = "System Media Output Switcher (For YouTube/Reels)",
+                                summary = "Switch YouTube / Instagram Reels output to Phone Speaker while MyPlayer stays on Bluetooth",
                                 icon = Icons.Filled.Speaker,
                                 onClick = { manager.openSystemMediaOutputSwitcher(context) }
                             )
