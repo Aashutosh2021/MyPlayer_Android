@@ -1,11 +1,13 @@
 package com.myplayer.app.ui.screens.trending
 
 import kotlin.math.abs
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,12 +36,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.LocalFireDepartment
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
@@ -50,6 +50,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +72,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.myplayer.app.R
+import com.myplayer.app.data.online.InnertubeApi
 import com.myplayer.app.data.recommendation.model.RecommendationSong
 import com.myplayer.app.ui.common.AlbumArtImage
 import com.myplayer.app.ui.opentune.OpenTuneRecognizeDialog
@@ -87,6 +89,9 @@ private sealed interface ExploreBoardTile {
         override val key: String,
         val title: String,
         val subtitle: String,
+        val browseId: String = "",
+        val params: String? = null,
+        val isGenre: Boolean = false,
         val coverUrl: String?,
         val heightDp: Dp
     ) : ExploreBoardTile
@@ -100,23 +105,37 @@ private sealed interface ExploreBoardTile {
     ) : ExploreBoardTile
 }
 
-private val EXPLORE_MOODS = listOf(
-    "Chill" to "Lo-Fi, Acoustic & Calm",
-    "Workout" to "Gym, High Tempo & Power",
-    "Focus" to "Deep Study & Instrumental",
-    "Party" to "Club Hits, Dance & EDM",
-    "Romance" to "Love Songs & Acoustic",
-    "Sad" to "Late Night & Heartbreak",
-    "Sleep" to "Ambient & Peaceful Rest",
-    "Energize" to "Upbeat Feel-Good Anthems",
-    "Bollywood" to "Top Hindi & Desi Hits",
-    "Punjabi" to "Punjabi Pop & Hip-Hop",
-    "Pop" to "Global Chart Toppers",
-    "Hip Hop" to "Rap, Trap & Beats",
-    "Deep Focus" to "Drone & Binaural Flow",
-    "Acoustic Chill" to "Warm Strings & Unplugged",
-    "Late Night" to "Synthwave & After Hours",
-    "Discoveries" to "Fresh Underground Gems"
+private data class DefaultMoodGenreSeed(
+    val title: String,
+    val subtitle: String,
+    val isGenre: Boolean
+)
+
+private val EXPLORE_MOODS_AND_GENRES = listOf(
+    DefaultMoodGenreSeed("Chill", "Lo-Fi, Coffee Shop & Calm", false),
+    DefaultMoodGenreSeed("Commute", "Morning Drive & Transit", false),
+    DefaultMoodGenreSeed("Energize", "Upbeat Feel-Good Anthems", false),
+    DefaultMoodGenreSeed("Feel good", "Sunshine & Positive Vibes", false),
+    DefaultMoodGenreSeed("Focus", "Flow State, Classical & Study", false),
+    DefaultMoodGenreSeed("Gaming", "Gaming Hits, Phonk & Soundtracks", false),
+    DefaultMoodGenreSeed("Party", "Club Hits, Dance & EDM", false),
+    DefaultMoodGenreSeed("Workout", "Gym, High Tempo & Power", false),
+    DefaultMoodGenreSeed("Romance", "Love Songs & Acoustic", false),
+    DefaultMoodGenreSeed("Sad", "Late Night & Heartbreak", false),
+    DefaultMoodGenreSeed("Sleep", "Ambient & Peaceful Rest", false),
+    DefaultMoodGenreSeed("Bollywood", "Top Hindi & Desi Hits", true),
+    DefaultMoodGenreSeed("Punjabi", "Punjabi Pop & Hip-Hop", true),
+    DefaultMoodGenreSeed("Pop", "Global Chart Toppers", true),
+    DefaultMoodGenreSeed("Hip Hop", "Rap, Trap & Beats", true),
+    DefaultMoodGenreSeed("Indie", "Fresh Indie & Underground", true),
+    DefaultMoodGenreSeed("Lo-Fi", "Chillhop & Late Night Beats", true),
+    DefaultMoodGenreSeed("Rock", "Classic & Alternative Rock", true),
+    DefaultMoodGenreSeed("Classical", "Orchestral, Piano & Cello", true),
+    DefaultMoodGenreSeed("Jazz", "Smooth Jazz & Cafe Sessions", true),
+    DefaultMoodGenreSeed("Deep Focus", "Drone & Binaural Flow", false),
+    DefaultMoodGenreSeed("Acoustic Chill", "Warm Strings & Unplugged", false),
+    DefaultMoodGenreSeed("Late Night", "Synthwave & After Hours", false),
+    DefaultMoodGenreSeed("Discoveries", "Fresh Underground Gems", true)
 )
 
 private val STAGGERED_HEIGHTS = listOf(148.dp, 204.dp, 174.dp, 236.dp, 138.dp, 192.dp)
@@ -137,10 +156,45 @@ fun TrendingScreen(
     val selectedGenres by viewModel.selectedGenres.collectAsStateWithLifecycle()
     val selectedArtists by viewModel.selectedArtists.collectAsStateWithLifecycle()
     val showTasteOnboarding by viewModel.showTasteOnboarding.collectAsStateWithLifecycle()
+    val currentSong by viewModel.currentSong.collectAsStateWithLifecycle()
+    val currentOnlineSong by viewModel.musicController.currentOnlineSong.collectAsStateWithLifecycle()
+    val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
 
     var selectedFilter by rememberSaveable { mutableStateOf("For you") }
     var selectedArtistFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var showRecognizeDialog by remember { mutableStateOf(false) }
+
+    // Active Genre/Mood Detail Subscreen state (null = show Explore board)
+    var activeMoodGenre by remember { mutableStateOf<ExploreBoardTile.MoodCard?>(null) }
+
+    // Fetch live YouTube Music Moods & Genres metadata so official browseId + params are used
+    var remoteMoodsAndGenres by remember { mutableStateOf<List<InnertubeApi.ExploreMoodGenre>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        val fetched = runCatching { viewModel.innertubeApi.fetchMoodsAndGenres() }.getOrDefault(emptyList())
+        if (fetched.isNotEmpty()) {
+            remoteMoodsAndGenres = fetched
+        }
+    }
+
+    // If the user tapped a Mood or Genre card (e.g., Focus, Gaming, Workout, Chill), open OpenTuneGenreMoodDetailScreen!
+    val currentMood = activeMoodGenre
+    if (currentMood != null) {
+        OpenTuneGenreMoodDetailScreen(
+            genreTitle = currentMood.title,
+            browseId = currentMood.browseId.takeIf { it.isNotBlank() },
+            params = currentMood.params,
+            innertubeApi = viewModel.innertubeApi,
+            currentPlayingVideoId = currentOnlineSong?.videoId ?: currentSong?.videoId ?: currentSong?.id,
+            isPlaying = isPlaying,
+            bottomPadding = bottomPadding,
+            onBack = { activeMoodGenre = null },
+            onPlaySongs = { songs, startIndex ->
+                viewModel.playOnlineSongs(songs, startIndex)
+                onNavigateToNowPlaying()
+            }
+        )
+        return
+    }
 
     if (showTasteOnboarding) {
         TasteOnboardingDialog(
@@ -170,6 +224,52 @@ fun TrendingScreen(
         (recommendations + homeRecommendations).distinctBy { it.videoId }
     }
 
+    // Merge default moods/genres with live YouTube Music moods/genres
+    val mergedMoodsAndGenres = remember(remoteMoodsAndGenres, allPool) {
+        val out = mutableListOf<ExploreBoardTile.MoodCard>()
+        val seen = HashSet<String>()
+
+        EXPLORE_MOODS_AND_GENRES.forEachIndexed { idx, seed ->
+            val remoteMatch = remoteMoodsAndGenres.firstOrNull {
+                it.title.equals(seed.title, ignoreCase = true)
+            }
+            val sampleCover = allPool.getOrNull(idx % allPool.size.coerceAtLeast(1))?.thumbnailUrl
+            if (seen.add(seed.title.lowercase())) {
+                out.add(
+                    ExploreBoardTile.MoodCard(
+                        key = "mood_card_${seed.title}",
+                        title = seed.title,
+                        subtitle = seed.subtitle,
+                        browseId = remoteMatch?.browseId.orEmpty(),
+                        params = remoteMatch?.params,
+                        isGenre = remoteMatch?.isGenre ?: seed.isGenre,
+                        coverUrl = sampleCover,
+                        heightDp = STAGGERED_HEIGHTS[abs(seed.title.hashCode()) % STAGGERED_HEIGHTS.size]
+                    )
+                )
+            }
+        }
+
+        remoteMoodsAndGenres.forEachIndexed { idx, remote ->
+            if (seen.add(remote.title.lowercase())) {
+                val sampleCover = allPool.getOrNull((idx + 5) % allPool.size.coerceAtLeast(1))?.thumbnailUrl
+                out.add(
+                    ExploreBoardTile.MoodCard(
+                        key = "mood_remote_${remote.title}_${remote.params}",
+                        title = remote.title,
+                        subtitle = remote.subtitle.ifBlank { if (remote.isGenre) "Genre" else "Mood" },
+                        browseId = remote.browseId,
+                        params = remote.params,
+                        isGenre = remote.isGenre,
+                        coverUrl = sampleCover,
+                        heightDp = STAGGERED_HEIGHTS[abs(remote.title.hashCode()) % STAGGERED_HEIGHTS.size]
+                    )
+                )
+            }
+        }
+        out
+    }
+
     // Build Artist Pills from user's selected artists + trending artists
     val artistPills = remember(selectedArtists, allPool) {
         val fromTracks = allPool.map { it.artist.substringBefore(",").substringBefore("&").trim() }
@@ -184,7 +284,7 @@ fun TrendingScreen(
     }
 
     // Build OpenTune Staggered Board tiles (interleaving Mood tiles and Track Pin cards)
-    val boardTiles: List<ExploreBoardTile> = remember(allPool, selectedFilter, selectedArtistFilter) {
+    val boardTiles: List<ExploreBoardTile> = remember(allPool, mergedMoodsAndGenres, selectedFilter, selectedArtistFilter) {
         if (selectedArtistFilter != null) {
             val filtered = allPool.filter {
                 it.artist.contains(selectedArtistFilter!!, ignoreCase = true) ||
@@ -201,23 +301,29 @@ fun TrendingScreen(
             }
         } else {
             when (selectedFilter) {
-                "Moods & genres" -> {
-                    EXPLORE_MOODS.mapIndexed { idx, (moodTitle, moodSub) ->
-                        val sampleCover = allPool.getOrNull(idx % allPool.size.coerceAtLeast(1))?.thumbnailUrl
-                        ExploreBoardTile.MoodCard(
-                            key = "mood_only_$moodTitle",
-                            title = moodTitle,
-                            subtitle = moodSub,
-                            coverUrl = sampleCover,
-                            heightDp = STAGGERED_HEIGHTS[abs(moodTitle.hashCode()) % STAGGERED_HEIGHTS.size]
-                        )
-                    }
+                "Moods", "Moods & genres" -> {
+                    mergedMoodsAndGenres.filter { !it.isGenre || selectedFilter == "Moods & genres" }
+                        .ifEmpty { mergedMoodsAndGenres }
+                }
+                "Genres" -> {
+                    mergedMoodsAndGenres.filter { it.isGenre }.ifEmpty { mergedMoodsAndGenres }
                 }
                 "New releases" -> {
                     allPool.reversed().mapIndexed { idx, song ->
                         ExploreBoardTile.TrackPinCard(
                             key = "new_rel_${song.videoId}_$idx",
-                            badge = if (idx < 5) "New Release" else "Fresh Pick",
+                            badge = if (idx < 5) "New release" else "Fresh Pick",
+                            song = song,
+                            indexInHotlist = idx,
+                            aspectRatio = CARD_ASPECTS[abs(song.videoId.hashCode()) % CARD_ASPECTS.size]
+                        )
+                    }
+                }
+                "Charts" -> {
+                    allPool.mapIndexed { idx, song ->
+                        ExploreBoardTile.TrackPinCard(
+                            key = "chart_pin_${song.videoId}_$idx",
+                            badge = "Chart #${idx + 1}",
                             song = song,
                             indexInHotlist = idx,
                             aspectRatio = CARD_ASPECTS[abs(song.videoId.hashCode()) % CARD_ASPECTS.size]
@@ -225,29 +331,19 @@ fun TrendingScreen(
                     }
                 }
                 else -> {
-                    // "For you": Pinterest-style interleaved Mood tiles + Hotlist / Trending BoardCards
+                    // "For you": Pinterest-style interleaved Mood/Genre tiles + Chart/New Release BoardCards
                     buildList<ExploreBoardTile> {
-                        val maxLen = maxOf(EXPLORE_MOODS.size, allPool.size)
+                        val maxLen = maxOf(mergedMoodsAndGenres.size, allPool.size)
                         for (i in 0 until maxLen) {
-                            if (i < EXPLORE_MOODS.size && i % 2 == 0) {
-                                val (mTitle, mSub) = EXPLORE_MOODS[i]
-                                val cover = allPool.getOrNull((i * 2) % allPool.size.coerceAtLeast(1))?.thumbnailUrl
-                                add(
-                                    ExploreBoardTile.MoodCard(
-                                        key = "board_mood_$mTitle",
-                                        title = mTitle,
-                                        subtitle = mSub,
-                                        coverUrl = cover,
-                                        heightDp = STAGGERED_HEIGHTS[abs(mTitle.hashCode()) % STAGGERED_HEIGHTS.size]
-                                    )
-                                )
+                            if (i < mergedMoodsAndGenres.size && i % 2 == 0) {
+                                add(mergedMoodsAndGenres[i])
                             }
                             if (i < allPool.size) {
                                 val song = allPool[i]
                                 val badge = when {
-                                    i == 0 -> "Hotlist #1"
-                                    i < 10 -> "Top ${i + 1}"
-                                    else -> "Trending"
+                                    i % 3 == 0 -> "Chart"
+                                    i % 3 == 1 -> "New release"
+                                    else -> "Top ${i + 1}"
                                 }
                                 add(
                                     ExploreBoardTile.TrackPinCard(
@@ -259,18 +355,8 @@ fun TrendingScreen(
                                     )
                                 )
                             }
-                            if (i < EXPLORE_MOODS.size && i % 2 == 1) {
-                                val (mTitle, mSub) = EXPLORE_MOODS[i]
-                                val cover = allPool.getOrNull((i * 3) % allPool.size.coerceAtLeast(1))?.thumbnailUrl
-                                add(
-                                    ExploreBoardTile.MoodCard(
-                                        key = "board_mood_$mTitle",
-                                        title = mTitle,
-                                        subtitle = mSub,
-                                        coverUrl = cover,
-                                        heightDp = STAGGERED_HEIGHTS[abs(mTitle.hashCode()) % STAGGERED_HEIGHTS.size]
-                                    )
-                                )
+                            if (i < mergedMoodsAndGenres.size && i % 2 == 1) {
+                                add(mergedMoodsAndGenres[i])
                             }
                         }
                     }
@@ -279,7 +365,7 @@ fun TrendingScreen(
         }
     }
 
-    val filterTabs = listOf("For you", "Moods & genres", "Hotlist Charts", "New releases")
+    val filterTabs = listOf("For you", "Moods", "Genres", "New releases", "Charts", "Hotlist Charts")
 
     Column(
         modifier = Modifier
@@ -370,7 +456,7 @@ fun TrendingScreen(
             }
         }
 
-        // ── Filter Pills Row (For you | Moods & genres | Hotlist Charts | New releases) ──
+        // ── Filter Pills Row (For you | Moods | Genres | New releases | Charts | Hotlist Charts) ──
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -706,12 +792,14 @@ fun TrendingScreen(
                                 OpenTuneMoodTile(
                                     title = tile.title,
                                     subtitle = tile.subtitle,
-                                    coverUrl = tile.coverUrl,
+                                    browseId = tile.browseId,
+                                    params = tile.params,
+                                    initialCoverUrl = tile.coverUrl,
+                                    innertubeApi = viewModel.innertubeApi,
                                     height = tile.heightDp,
                                     onClick = {
-                                        viewModel.playCategory(tile.title) {
-                                            onNavigateToNowPlaying()
-                                        }
+                                        // Open OpenTune-style Genre/Mood Detail Subscreen!
+                                        activeMoodGenre = tile
                                     }
                                 )
                             }
@@ -790,17 +878,34 @@ private fun ExploreFeatureActionCard(
     }
 }
 
-/** OpenTune Mood Tile: HSV color + optional cover artwork + vertical gradient scrim + bold bottom-left title. */
+/**
+ * OpenTune Mood Tile (`ExploreScreen.kt` lines 324–355):
+ * Lazily fetches the first cover from the mood's playlists behind a scrim in the mood's own HSV color,
+ * with the bold mood/genre name at the bottom-left. Clicking opens `OpenTuneGenreMoodDetailScreen`.
+ */
 @Composable
 private fun OpenTuneMoodTile(
     title: String,
     subtitle: String,
-    coverUrl: String?,
+    browseId: String,
+    params: String?,
+    initialCoverUrl: String?,
+    innertubeApi: InnertubeApi,
     height: Dp,
     onClick: () -> Unit
 ) {
     val hue = (abs(title.hashCode()) % 360).toFloat()
     val moodColor = Color.hsv(hue, 0.65f, 0.55f)
+    var resolvedCover by remember(title, initialCoverUrl) { mutableStateOf(initialCoverUrl) }
+
+    LaunchedEffect(title, browseId, params) {
+        if (resolvedCover.isNullOrBlank()) {
+            resolvedCover = runCatching {
+                innertubeApi.fetchFirstCoverForMood(title, browseId.takeIf { it.isNotBlank() }, params)
+            }.getOrNull()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -809,9 +914,13 @@ private fun OpenTuneMoodTile(
             .background(moodColor)
             .bouncyPopClick(onClick = onClick)
     ) {
-        if (!coverUrl.isNullOrBlank()) {
+        AnimatedVisibility(
+            visible = !resolvedCover.isNullOrBlank(),
+            enter = fadeIn(tween(450)),
+            modifier = Modifier.fillMaxSize()
+        ) {
             AlbumArtImage(
-                uri = coverUrl,
+                uri = resolvedCover,
                 title = title,
                 artist = subtitle,
                 size = height,
@@ -825,8 +934,8 @@ private fun OpenTuneMoodTile(
                 .background(
                     Brush.verticalGradient(
                         listOf(
-                            moodColor.copy(alpha = 0.15f),
-                            moodColor.copy(alpha = 0.62f),
+                            moodColor.copy(alpha = 0.08f),
+                            moodColor.copy(alpha = 0.58f),
                             moodColor.copy(alpha = 0.95f)
                         )
                     )

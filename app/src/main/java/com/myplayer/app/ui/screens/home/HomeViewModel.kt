@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.myplayer.app.data.local.dao.PlayedSongHistoryDao
 import com.myplayer.app.data.local.datastore.SettingsDataStore
 import com.myplayer.app.data.local.entity.SongEntity
 import com.myplayer.app.data.online.InnertubeApi
@@ -12,11 +11,7 @@ import com.myplayer.app.data.online.model.OnlineSong
 import com.myplayer.app.data.recognize.ShazamRecognizer
 import com.myplayer.app.data.recommendation.RecommendationCoordinator
 import com.myplayer.app.data.recommendation.ai.OnDeviceMusicAiModel
-import com.myplayer.app.data.recommendation.api.LastFmRecommendationSource
-import com.myplayer.app.data.recommendation.cache.RecommendationCache
 import com.myplayer.app.data.recommendation.model.RecommendationSong
-import com.myplayer.app.data.recommendation.state.RecommendationUserState
-import com.myplayer.app.data.recommendation.state.RecommendationUserStateDetector
 import com.myplayer.app.data.repository.DownloadRepository
 import com.myplayer.app.data.repository.MusicRepository
 import com.myplayer.app.data.repository.RecentHistoryRepository
@@ -40,20 +35,14 @@ class HomeViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val downloadRepository: DownloadRepository,
     private val recommendationCoordinator: RecommendationCoordinator,
-    private val userStateDetector: RecommendationUserStateDetector,
     private val recentHistoryRepository: RecentHistoryRepository,
-    private val playedSongHistoryDao: PlayedSongHistoryDao,
-    private val innertubeApi: InnertubeApi,
-    private val recommendationCache: RecommendationCache,
-    private val lastFmRecommendationSource: LastFmRecommendationSource,
+    val innertubeApi: InnertubeApi,
     private val aiModel: OnDeviceMusicAiModel,
     val spotifyManager: com.myplayer.app.data.spotify.SpotifyIntegrationManager,
     val youtubeManager: com.myplayer.app.data.youtube.YouTubeIntegrationManager,
     val shazamRecognizer: ShazamRecognizer
 ) : ViewModel() {
 
-    private val _userState = MutableStateFlow<RecommendationUserState?>(null)
-    val userState: StateFlow<RecommendationUserState?> = _userState.asStateFlow()
 
     val selectedCategory = MutableStateFlow("All")
 
@@ -472,6 +461,25 @@ class HomeViewModel @Inject constructor(
         }
         musicController.playOnlineSongs(onlineSongs, clampedIndex)
         val selected = songs.getOrNull(clampedIndex)
+        if (selected != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                repository.addRecentHistory(selected.videoId)
+            }
+        }
+    }
+
+    fun playOnlineSongs(songs: List<OnlineSong>, startIndex: Int = 0) {
+        if (songs.isEmpty()) return
+        val clampedIndex = startIndex.coerceIn(0, songs.size - 1)
+        val mapped = songs.map { song ->
+            if (song.streamUrl.isNullOrBlank()) {
+                song.copy(streamUrl = "online://${song.videoId}")
+            } else {
+                song
+            }
+        }
+        musicController.playOnlineSongs(mapped, clampedIndex)
+        val selected = mapped.getOrNull(clampedIndex)
         if (selected != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 repository.addRecentHistory(selected.videoId)

@@ -34,11 +34,9 @@ import com.myplayer.app.ui.components.WhatsNewDialog
 import com.myplayer.app.ui.components.WhatsNewRepository
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import com.myplayer.app.ui.components.FloatingNavBar
 import com.myplayer.app.ui.components.MorphingBottomChrome
 import com.myplayer.app.ui.components.rememberChromeScroll
 import com.myplayer.app.ui.navigation.Screen
-import com.myplayer.app.ui.screens.downloads.DownloadsScreen
 import com.myplayer.app.ui.screens.home.HomeScreen
 import com.myplayer.app.ui.screens.library.LibraryScreen
 import com.myplayer.app.ui.screens.library.PlaylistDetailScreen
@@ -365,14 +363,6 @@ fun MainScreen(viewModel: MainViewModel = hiltViewModel()) {
                     },
                     bottomPadding = barHeight,
                     viewModel = homeViewModel
-                )
-            }
-            composable(Screen.Downloads.route) {
-                DownloadsScreen(
-                    onNavigateToNowPlaying = {
-                        navController.navigate(Screen.NowPlaying.route) { launchSingleTop = true }
-                    },
-                    bottomPadding = barHeight
                 )
             }
             composable(Screen.Library.route) {

@@ -37,8 +37,4 @@ class AriaPerformanceMonitor @Inject constructor() {
     fun getSampleCount(category: String): Long {
         return statsMap[category]?.getCount() ?: 0L
     }
-
-    fun clearStats() {
-        statsMap.clear()
-    }
 }

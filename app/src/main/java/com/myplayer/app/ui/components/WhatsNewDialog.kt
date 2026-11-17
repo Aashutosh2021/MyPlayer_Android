@@ -47,19 +47,29 @@ object WhatsNewRepository {
 
     fun getCurrentFeatures(): List<WhatsNewFeature> = listOf(
         WhatsNewFeature(
-            icon = Icons.Filled.FolderOpen,
-            title = "Local Music Folder Access & Audio Scanner",
-            description = "Set your local music folder path in Settings or Library > Local Files to scan and play all your local MP3, M4A, FLAC, and WAV songs."
+            icon = Icons.Filled.GraphicEq,
+            title = "True Dual-Deck Equal-Power Crossfade & Blend Skips",
+            description = "Zero-dropout overlapping DJ transitions with isolated full-DSP decks, constant-power volume curves (no mid-fade silence), Blend Manual Skips, and 5 Crossmix styles in Audio Lab."
+        ),
+        WhatsNewFeature(
+            icon = Icons.Filled.SystemUpdate,
+            title = "In-App APK Updater & Beta Channel",
+            description = "Download and install official MyPlayer APK updates directly inside the app with live progress notifications, ABI matching, 24-hour snooze, and optional Beta/Nightly release checks."
+        ),
+        WhatsNewFeature(
+            icon = Icons.Filled.LibraryMusic,
+            title = "Redesigned Library, Home Speed Dial & Morphing Nav Bar",
+            description = "Refreshed Library hub (Listening Experience card, Liked, Downloads, Local files, Replay, Playlists), upgraded Home Speed Dial & Trending Hotlist, and fluid morphing navigation."
+        ),
+        WhatsNewFeature(
+            icon = Icons.Filled.Tv,
+            title = "Android TV Mode & Headphone AutoEq / USB DAC",
+            description = "Added dedicated Android TV UI with mobile QR remote control, AutoEq headphone correction profiles, SponsorBlock skipping, DLNA Wi-Fi casting, and Bit-Perfect USB DAC support."
         ),
         WhatsNewFeature(
             icon = Icons.Filled.AudioFile,
-            title = "Download MP3 / M4A Files to Device Storage",
-            description = "Every song menu now includes 'Download MP3 File' and 'Download M4A File' alongside 'Download Offline' so you can save accessible audio files directly in Downloads/MyPlayer & Music/MyPlayer."
-        ),
-        WhatsNewFeature(
-            icon = Icons.Filled.PlayCircleFilled,
-            title = "YouTube Music Login, Playlist Import & AI Recommendations",
-            description = "Sign in to YouTube Music or paste any YouTube/Spotify playlist link to import playlists and blend personalized recommendations into your 128-D AI engine."
+            title = "Single-Folder Local Scanner & MP3 / M4A Export",
+            description = "Pick your local music folder in Library or Settings, reorder playlists reliably, and export songs directly as MP3 or M4A alongside offline cached playback."
         )
     )
 }

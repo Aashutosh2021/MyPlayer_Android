@@ -73,24 +73,4 @@ class DownloadProvider @Inject constructor(
             return@withContext AriaGeneralResponse(AriaStatus.FAILURE, commandOrdinal, transactionId, "Error enqueuing download: ${e.message}")
         }
     }
-
-    suspend fun deleteDownload(songId: String, commandOrdinal: Int, transactionId: String?): AriaGeneralResponse = withContext(Dispatchers.IO) {
-        val startTime = System.currentTimeMillis()
-        if (songId.isBlank()) return@withContext AriaGeneralResponse(AriaStatus.BAD_REQUEST, commandOrdinal, transactionId)
-
-        val videoId = songId.removePrefix("online://")
-
-        // Validate download exists
-        if (!downloadRepository.isDownloaded(videoId)) {
-            return@withContext AriaGeneralResponse(AriaStatus.NOT_FOUND, commandOrdinal, transactionId, "Download record not found for $videoId.")
-        }
-
-        try {
-            downloadRepository.deleteDownloadById(videoId)
-            performanceMonitor.recordLatency("download_ops", System.currentTimeMillis() - startTime)
-            return@withContext AriaGeneralResponse(AriaStatus.SUCCESS, commandOrdinal, transactionId)
-        } catch (e: Exception) {
-            return@withContext AriaGeneralResponse(AriaStatus.FAILURE, commandOrdinal, transactionId, "Error deleting downloaded file: ${e.message}")
-        }
-    }
 }

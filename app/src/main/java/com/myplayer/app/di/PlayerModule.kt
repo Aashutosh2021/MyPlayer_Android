@@ -34,7 +34,6 @@ import com.myplayer.app.playback.AudioOutputRouterManager
 import com.myplayer.app.playback.dsp.LastWaveDspAudioProcessor
 import com.myplayer.app.playback.dsp.MasterAudioDspProcessor
 import com.myplayer.app.playback.dsp.MyPlayerCrossmixAudioProcessor
-import com.myplayer.app.playback.dsp.SpatialAudioProcessor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -302,7 +301,6 @@ class MyPlayerDeckFactory @Inject constructor(
     private val cacheDataSourceFactory: CacheDataSource.Factory,
     private val lastWaveDspProcessor: LastWaveDspAudioProcessor,
     private val masterAudioDspProcessor: MasterAudioDspProcessor,
-    private val spatialAudioProcessor: SpatialAudioProcessor,
     private val audioFx: com.myplayer.app.myplayerfx.AudioFxService,
     private val audioOutputRouterManager: AudioOutputRouterManager
 ) {

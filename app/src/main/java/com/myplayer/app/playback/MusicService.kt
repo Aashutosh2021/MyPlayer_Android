@@ -19,8 +19,6 @@ import com.myplayer.app.data.preferences.AudioPlaybackStore
 import com.myplayer.app.data.preferences.AudioSettingsRepository
 import com.myplayer.app.playback.dsp.LastWaveDspAudioProcessor
 import com.myplayer.app.playback.dsp.MasterAudioDspProcessor
-import com.myplayer.app.playback.dsp.SpatialAudioProcessor
-import com.myplayer.app.playback.dsp.SpatialParams
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,19 +58,13 @@ class MusicService : MediaSessionService() {
     @Inject
     lateinit var masterAudioDspProcessor: MasterAudioDspProcessor
     @Inject
-    lateinit var spatialAudioProcessor: SpatialAudioProcessor
-    @Inject
     lateinit var cacheDataSourceFactory: androidx.media3.datasource.cache.CacheDataSource.Factory
     @Inject
     lateinit var sponsorBlockManager: com.myplayer.app.data.sponsorblock.SponsorBlockManager
     @Inject
-    lateinit var upgradeHandoffManager: UpgradeHandoffManager
-    @Inject
     lateinit var bitPerfectUsbController: BitPerfectUsbController
     @Inject
     lateinit var audioOutputRouterManager: AudioOutputRouterManager
-    @Inject
-    lateinit var mixAnalyzer: com.myplayer.app.playback.mix.MixAnalyzer
 
     @Volatile private var currentAudioPlaybackState = AudioPlaybackState()
 
@@ -91,20 +83,6 @@ class MusicService : MediaSessionService() {
     private val servicePlayerListener = object : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             super.onMediaItemTransition(mediaItem, reason)
-            playbackStateManager.currentOnlineSong.value?.let { online ->
-                val tier = currentAudioPlaybackState.streamingQuality
-                val preferLossless = tier != com.myplayer.app.data.preferences.AudioQualityTier.YOUTUBE_MUSIC &&
-                    tier != com.myplayer.app.data.preferences.AudioQualityTier.DATA_SAVER
-                upgradeHandoffManager.scheduleMidStreamUpgrade(
-                    scope = serviceScope,
-                    player = player,
-                    videoId = online.videoId,
-                    title = online.title,
-                    artist = online.artist,
-                    durationMs = online.durationMs,
-                    preferLossless = preferLossless
-                )
-            }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -496,15 +474,6 @@ class MusicService : MediaSessionService() {
                 bitPerfectUsbController.setBitPerfectEnabled(state.bitPerfectMode || state.usbExclusiveOutput)
                 val allowSystemFx = state.systemAudioEffects && !audioOutputRouterManager.isSplitRoutingActive
                 audioFeatureManagers.toggleSystemAudioEffects(player.audioSessionId, allowSystemFx)
-                spatialAudioProcessor.updateParams(
-                    SpatialParams(
-                        enabled = state.spatialAudioEnabled,
-                        mode = state.spatialMode,
-                        speakerAngle = state.spatialSpeakerAngle,
-                        amount = state.spatialAmount,
-                        surround = state.dolbySurroundAtmos
-                    )
-                )
                 if (state.spatialAudioEnabled || state.dolbySurroundAtmos) {
                     com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.spatialEnabled = state.spatialAudioEnabled
                     com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.spatialIsSpeakersMode =

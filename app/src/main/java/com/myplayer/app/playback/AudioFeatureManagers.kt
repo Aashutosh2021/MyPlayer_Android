@@ -686,7 +686,7 @@ class AudioFeatureManagers @Inject constructor(
             val t = URLEncoder.encode(trackTitle, "UTF-8")
             val a = URLEncoder.encode(artistName, "UTF-8")
             val url = "https://lrclib.net/api/get?track_name=$t&artist_name=$a&duration=$durationSeconds"
-            val req = Request.Builder().url(url).header("User-Agent", "MyPlayer/6.6").build()
+            val req = Request.Builder().url(url).header("User-Agent", "MyPlayer/${com.myplayer.app.BuildConfig.VERSION_NAME}").build()
 
             okHttpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null

@@ -98,7 +98,4 @@ interface PlaylistDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insertPlaylistSongs(songs: List<PlaylistSongCrossReference>)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    fun insertPlaylists(playlists: List<PlaylistEntity>)
 }

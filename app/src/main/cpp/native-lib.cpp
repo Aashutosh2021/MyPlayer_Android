@@ -77,8 +77,6 @@ static const uint8_t OBF_PROC_MAPS[] = {
 };
 // Obfuscated "frida"
 static const uint8_t OBF_FRIDA[] = {0x3C,0x4E,0x17,0x75,0x0C};
-// Obfuscated "/su"  
-static const uint8_t OBF_SU[] = {0x75,0x4F,0x0B};
 // Obfuscated "/system/bin/su"
 static const uint8_t OBF_SYSBIN_SU[] = {
     0x75,0x4F,0x07,0x62,0x19,0x27,0x37,0x13,0x1C,0x78,0x03,0x6D,0x29,0x49
@@ -211,54 +209,6 @@ static bool nativeCheckPtrace() {
 // =============================================================================
 
 extern "C" {
-
-/**
- * Returns true if Frida is detected (port 27042 open OR library in maps).
- */
-JNIEXPORT jboolean JNICALL
-Java_com_myplayer_app_security_SecurityNativeBridge_nativeIsFridaDetected(
-    JNIEnv* env, jobject /* thiz */) {
-    return static_cast<jboolean>(
-        nativeCheckFridaPort() || nativeCheckProcMapsForFrida()
-    );
-}
-
-/**
- * Returns true if a debugger is attached (TracerPid != 0 or ptrace fails).
- */
-JNIEXPORT jboolean JNICALL
-Java_com_myplayer_app_security_SecurityNativeBridge_nativeIsDebuggerAttached(
-    JNIEnv* env, jobject /* thiz */) {
-    return static_cast<jboolean>(
-        nativeCheckTracerPid() || nativeCheckPtrace()
-    );
-}
-
-/**
- * Returns true if su binary is found in standard root paths (via fopen, not Java).
- */
-JNIEXPORT jboolean JNICALL
-Java_com_myplayer_app_security_SecurityNativeBridge_nativeIsRooted(
-    JNIEnv* env, jobject /* thiz */) {
-    return static_cast<jboolean>(nativeCheckSuBinary());
-}
-
-/**
- * Returns the AES-XOR-obfuscated YouTube Music Innertube base URL.
- * This is returned as bytes to avoid the string being interceptable via
- * JNI string table hooks.
- */
-JNIEXPORT jbyteArray JNICALL
-Java_com_myplayer_app_security_SecurityNativeBridge_nativeGetBaseUrlBytes(
-    JNIEnv* env, jobject /* thiz */) {
-    // "https://music.youtube.com/youtubei/v1" assembled here in native
-    // (also stored obfuscated in StringEncryptionManager as a second layer)
-    static const char* url = "https://music.youtube.com/youtubei/v1";
-    jsize len = static_cast<jsize>(strlen(url));
-    jbyteArray result = env->NewByteArray(len);
-    env->SetByteArrayRegion(result, 0, len, reinterpret_cast<const jbyte*>(url));
-    return result;
-}
 
 /**
  * Runs all native security checks and returns a bitmask:

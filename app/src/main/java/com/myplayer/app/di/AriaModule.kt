@@ -2,8 +2,6 @@ package com.myplayer.app.di
 
 import android.content.Context
 import com.myplayer.app.aria.cache.AriaMemoryCache
-import com.myplayer.app.aria.dispatcher.CommandDispatcher
-import com.myplayer.app.aria.event.AriaEventPublisher
 import com.myplayer.app.aria.performance.AriaPerformanceMonitor
 import com.myplayer.app.aria.providers.*
 import com.myplayer.app.aria.recovery.AriaStateRecoveryManager
@@ -39,11 +37,6 @@ object AriaModule {
         return CallerVerifier(context, signatureVerifier)
     }
 
-    @Provides
-    @Singleton
-    fun provideAriaEventPublisher(): AriaEventPublisher {
-        return AriaEventPublisher()
-    }
 
     @Provides
     @Singleton
@@ -166,41 +159,4 @@ object AriaModule {
         return LyricsProvider(musicController, lyricsRepository, performanceMonitor)
     }
 
-    @Provides
-    @Singleton
-    fun provideCommandDispatcher(
-        @ApplicationContext context: Context,
-        callerVerifier: CallerVerifier,
-        eventPublisher: AriaEventPublisher,
-        performanceMonitor: AriaPerformanceMonitor,
-        musicController: MusicController,
-        playbackController: PlaybackController,
-        searchProvider: SearchProvider,
-        playlistProvider: PlaylistProvider,
-        queueProvider: QueueProvider,
-        downloadProvider: DownloadProvider,
-        metadataProvider: MetadataProvider,
-        historyProvider: HistoryProvider,
-        recommendationProvider: RecommendationProvider,
-        equalizerProvider: EqualizerProvider,
-        lyricsProvider: LyricsProvider
-    ): CommandDispatcher {
-        return CommandDispatcher(
-            context,
-            callerVerifier,
-            eventPublisher,
-            performanceMonitor,
-            musicController,
-            playbackController,
-            searchProvider,
-            playlistProvider,
-            queueProvider,
-            downloadProvider,
-            metadataProvider,
-            historyProvider,
-            recommendationProvider,
-            equalizerProvider,
-            lyricsProvider
-        )
-    }
 }

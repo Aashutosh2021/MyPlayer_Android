@@ -61,8 +61,8 @@ android {
         applicationId = "com.myplayer.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 66
-        versionName = "6.6"
+        versionCode = 68
+        versionName = "6.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -77,7 +77,7 @@ android {
 
         // Embed the NDK native library
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
 
         externalNativeBuild {
@@ -226,7 +226,6 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
 
@@ -245,7 +244,6 @@ dependencies {
     // Media3
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
-    implementation(libs.media3.datasource.okhttp)
     // LastWave's secret weapon for 24-bit FLAC & Atmos decoding:
     implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.3.1+2")
 

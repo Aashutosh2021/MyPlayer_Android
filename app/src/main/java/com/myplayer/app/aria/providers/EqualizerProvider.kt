@@ -61,22 +61,4 @@ class EqualizerProvider @Inject constructor(
             }
         }
     }
-
-    fun applyCustomBands(bands: FloatArray, commandOrdinal: Int, transactionId: String?): AriaGeneralResponse {
-        if (bands.isEmpty()) {
-            return AriaGeneralResponse(AriaStatus.FAILURE, commandOrdinal, transactionId, "Empty EQ bands array")
-        }
-        if (bands.size == 10) {
-            MyPlayerAudioFxDspBridge.setEq(true, bands.toList(), 0f)
-        } else {
-            val gains10 = FloatArray(10) { bands.getOrElse(it) { 0f }.coerceIn(-12f, 12f) }
-            masterAudioDspProcessor.updateFromAudioLab10Band(true, gains10, 0f, true)
-        }
-        return AriaGeneralResponse(
-            AriaStatus.SUCCESS,
-            commandOrdinal,
-            transactionId,
-            "Applied custom equalizer bands (${bands.size} bands)"
-        )
-    }
 }

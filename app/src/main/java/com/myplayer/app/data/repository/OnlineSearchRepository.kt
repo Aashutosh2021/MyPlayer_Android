@@ -34,8 +34,6 @@ class OnlineSearchRepository @Inject constructor(
     }
 
     suspend fun deleteSearch(query: String) = recentSearchDao.delete(query)
-
-    suspend fun clearAllSearches() = recentSearchDao.clearAll()
 }
 
 class InnertubeSearchPagingSource(

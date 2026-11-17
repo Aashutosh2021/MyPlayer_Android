@@ -60,6 +60,37 @@ fun OnlineSearchScreen(
     var songToAddToPlaylist by remember { mutableStateOf<OnlineSong?>(null) }
     var showAddAllDialog by remember { mutableStateOf(false) }
     var songToRemoveDownload by remember { mutableStateOf<OnlineSong?>(null) }
+    var selectedGenreOrMood by remember { mutableStateOf<String?>(null) }
+    val currentOnlineSong by viewModel.musicController.currentOnlineSong.collectAsStateWithLifecycle()
+    val currentLocalSong by viewModel.musicController.currentSong.collectAsStateWithLifecycle()
+    val isPlayingNow by viewModel.musicController.isPlaying.collectAsStateWithLifecycle()
+
+    if (selectedGenreOrMood != null) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { selectedGenreOrMood = null },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            com.myplayer.app.ui.screens.trending.OpenTuneGenreMoodDetailScreen(
+                genreTitle = selectedGenreOrMood!!,
+                innertubeApi = viewModel.innertubeApi,
+                currentPlayingVideoId = currentOnlineSong?.videoId ?: currentLocalSong?.videoId ?: currentLocalSong?.id,
+                isPlaying = isPlayingNow,
+                bottomPadding = 32.dp,
+                onBack = { selectedGenreOrMood = null },
+                onPlaySongs = { songs, startIndex ->
+                    val target = songs.getOrNull(startIndex) ?: songs.firstOrNull()
+                    if (target != null) {
+                        viewModel.playSongFromSearch(target, songs)
+                        selectedGenreOrMood = null
+                        onNavigateToNowPlaying()
+                    }
+                }
+            )
+        }
+    }
 
     // Show error snackbar
     val snackbarHostState = remember { SnackbarHostState() }
@@ -204,6 +235,7 @@ fun OnlineSearchScreen(
                 onDeleteHistorySong = { id -> viewModel.deletePlayedHistoryItem(id) },
                 onClearHistory = { viewModel.clearPlayedHistory() },
                 onSearchClick = { q -> viewModel.onSearch(q) },
+                onMoodGenreClick = { genreTitle -> selectedGenreOrMood = genreTitle },
                 onDeleteSearchClick = { q -> viewModel.deleteRecentSearch(q) },
                 bottomPadding = bottomPadding
             )
@@ -242,6 +274,7 @@ fun SearchHistorySection(
     onDeleteHistorySong: (String) -> Unit,
     onClearHistory: () -> Unit,
     onSearchClick: (String) -> Unit,
+    onMoodGenreClick: (String) -> Unit = onSearchClick,
     onDeleteSearchClick: (String) -> Unit,
     bottomPadding: Dp = 100.dp
 ) {
@@ -309,7 +342,7 @@ fun SearchHistorySection(
                         val mood = MYPLAYER_MOODS[idx]
                         MyPlayerMoodGenreCard(
                             item = mood,
-                            onClick = { onSearchClick(mood.title) },
+                            onClick = { onMoodGenreClick(mood.title) },
                             modifier = Modifier.width(160.dp)
                         )
                     }
@@ -334,7 +367,7 @@ fun SearchHistorySection(
                         val genre = MYPLAYER_GENRES[idx]
                         MyPlayerMoodGenreCard(
                             item = genre,
-                            onClick = { onSearchClick(genre.title) },
+                            onClick = { onMoodGenreClick(genre.title) },
                             modifier = Modifier.width(160.dp)
                         )
                     }
@@ -583,25 +616,6 @@ private fun formatRelativeTime(timestamp: Long): String {
         days < 15 -> "${days}d ago"
         else -> "15d ago"
     }
-}
-
-@Composable
-fun RecentSearchesSection(
-    searches: List<RecentSearchEntity>,
-    onSearchClick: (String) -> Unit,
-    onDeleteClick: (String) -> Unit,
-    bottomPadding: Dp = 100.dp
-) {
-    SearchHistorySection(
-        playedHistory = emptyList(),
-        searches = searches,
-        onPlayHistorySong = {},
-        onDeleteHistorySong = {},
-        onClearHistory = {},
-        onSearchClick = onSearchClick,
-        onDeleteSearchClick = onDeleteClick,
-        bottomPadding = bottomPadding
-    )
 }
 
 @Composable

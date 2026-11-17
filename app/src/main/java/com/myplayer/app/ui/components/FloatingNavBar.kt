@@ -788,23 +788,3 @@ internal fun rememberStretchingLens(
     }
     return ({ leftPos.dp } to { rightPos.dp })
 }
-
-/**
- * Backward-compatible standalone FloatingNavBar if referenced directly anywhere else.
- */
-@Composable
-fun FloatingNavBar(
-    currentRoute: String?,
-    onNavigate: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    MorphingBottomChrome(
-        collapsed = false,
-        currentRoute = currentRoute,
-        onNavigate = onNavigate,
-        onExpand = {},
-        hasMiniPlayer = false,
-        miniPlayerContent = { _, _ -> },
-        modifier = modifier
-    )
-}

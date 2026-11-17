@@ -129,59 +129,6 @@ fun Modifier.clayConcave(
     .clip(RoundedCornerShape(borderRadius))
 
 /**
- * 3. Tactile 3D Spring Press Effect (Zero layout cost — runs on GPU RenderThread)
- */
-fun Modifier.bouncy3DClick(
-    scaleDown: Float = 0.95f,
-    onClick: () -> Unit
-): Modifier = composed {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) scaleDown else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "bouncy3DScale"
-    )
-    this
-        .graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-        }
-        .clickable(
-            interactionSource = interactionSource,
-            indication = null,
-            onClick = onClick
-        )
-}
-
-/**
- * 4. 3D CoverFlow Carousel Modifier for LazyRow items
- */
-fun Modifier.carousel3DItem(
-    listState: LazyListState,
-    index: Int
-): Modifier = this.graphicsLayer {
-    val layoutInfo = listState.layoutInfo
-    val itemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
-    if (itemInfo != null && layoutInfo.viewportEndOffset > 0) {
-        val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
-        val itemCenter = itemInfo.offset + (itemInfo.size / 2f)
-        val normalizedOffset = ((itemCenter - viewportCenter) / viewportCenter.coerceAtLeast(1f)).coerceIn(-1f, 1f)
-        val absOffset = kotlin.math.abs(normalizedOffset)
-
-        val scale = 1f - (absOffset * 0.10f)
-        scaleX = scale
-        scaleY = scale
-        rotationY = -normalizedOffset * 16f
-        cameraDistance = 12f * density
-        alpha = 1f - (absOffset * 0.22f)
-    }
-}
-
-/**
  * 5. SLIDE + POP-UP ENTRANCE ANIMATION (Scroll karte waqt cards pop-up hokar aate hain)
  */
 fun Modifier.slidePopIn(
@@ -279,26 +226,6 @@ fun Modifier.bounceClick(
             indication = null,
             onClick = onClick
         )
-}
-
-/**
- * 8. SHIMMER EFFECT (Zero allocation per frame — operates on graphicsLayer alpha)
- */
-fun Modifier.shimmerEffect(): Modifier = composed {
-    val transition = rememberInfiniteTransition(label = "shimmer")
-    val alpha by transition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 0.65f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "shimmerAlpha"
-    )
-    // Use graphicsLayer alpha instead of reallocating Modifier.background every frame!
-    this
-        .graphicsLayer { this.alpha = alpha }
-        .background(Color.Gray.copy(alpha = 0.35f))
 }
 
 /**

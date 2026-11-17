@@ -83,9 +83,7 @@ class AriaService : MusicConnectorService() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     // Tracks seen WorkInfo task states to prevent duplicate events
-    private val seenDownloadStarts = ConcurrentSkipListSet<String>()
     private val seenDownloadCompletes = ConcurrentSkipListSet<String>()
-    private val seenDownloadFailures = ConcurrentSkipListSet<String>()
 
     override fun appName(): String = "MyPlayer"
 

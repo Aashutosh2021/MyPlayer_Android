@@ -61,10 +61,6 @@ class PoTokenGenerator @Inject constructor(
         }
     }
 
-    fun invalidate() {
-        cachedBundle = null
-    }
-
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun generateViaWebView(visitorData: String, videoId: String): PoTokenBundle? =
         withContext(Dispatchers.Main) {

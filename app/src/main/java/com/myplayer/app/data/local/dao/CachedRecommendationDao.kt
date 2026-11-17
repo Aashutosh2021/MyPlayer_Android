@@ -15,15 +15,9 @@ interface CachedRecommendationDao {
     @Query("SELECT * FROM cached_recommendations ORDER BY cachedAt DESC LIMIT :limit")
     suspend fun getRecent(limit: Int = 50): List<CachedRecommendationEntity>
 
-    @Query("SELECT * FROM cached_recommendations WHERE seedId = :seedId ORDER BY cachedAt DESC LIMIT :limit")
-    suspend fun getBySeed(seedId: String, limit: Int = 30): List<CachedRecommendationEntity>
-
     @Query("DELETE FROM cached_recommendations WHERE cachedAt < :expireBeforeMs")
     suspend fun deleteExpired(expireBeforeMs: Long)
 
     @Query("DELETE FROM cached_recommendations")
     suspend fun clearAll()
-
-    @Query("SELECT COUNT(*) FROM cached_recommendations")
-    suspend fun count(): Int
 }

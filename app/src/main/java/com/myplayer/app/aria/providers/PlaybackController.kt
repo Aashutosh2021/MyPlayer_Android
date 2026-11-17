@@ -188,19 +188,6 @@ class PlaybackController @Inject constructor(
         return AriaGeneralResponse(AriaStatus.SUCCESS, commandOrdinal, transactionId)
     }
 
-    fun setSpeed(speed: Float, commandOrdinal: Int, transactionId: String?): AriaGeneralResponse {
-        val startTime = System.currentTimeMillis()
-        if (speed < 0.25f || speed > 2.0f) {
-            return AriaGeneralResponse(AriaStatus.BAD_REQUEST, commandOrdinal, transactionId, "Playback speed must be between 0.25 and 2.0.")
-        }
-        if (musicController.currentSong.value == null && musicController.currentOnlineSong.value == null) {
-            return AriaGeneralResponse(AriaStatus.NOTHING_PLAYING, commandOrdinal, transactionId)
-        }
-        musicController.setPlaybackSpeed(speed)
-        performanceMonitor.recordLatency("commands", System.currentTimeMillis() - startTime)
-        return AriaGeneralResponse(AriaStatus.SUCCESS, commandOrdinal, transactionId)
-    }
-
     fun setVolume(volume: Float, commandOrdinal: Int, transactionId: String?): AriaGeneralResponse {
         val startTime = System.currentTimeMillis()
         if (volume < 0.0f || volume > 1.0f) {

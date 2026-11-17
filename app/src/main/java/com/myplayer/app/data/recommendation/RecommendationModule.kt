@@ -1,8 +1,6 @@
 package com.myplayer.app.data.recommendation
 
 import com.myplayer.app.data.recommendation.api.RecommendationSource
-import com.myplayer.app.data.recommendation.api.YouTubeRecommendationSource
-import com.myplayer.app.data.recommendation.strategy.DefaultRankingStrategy
 import com.myplayer.app.data.recommendation.strategy.RecommendationStrategy
 import dagger.Binds
 import dagger.Module

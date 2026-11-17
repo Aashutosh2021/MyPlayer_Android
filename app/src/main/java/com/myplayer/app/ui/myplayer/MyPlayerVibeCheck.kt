@@ -551,28 +551,3 @@ fun MyPlayerFunnyVibeCheckSettingsCard(
         }
     }
 }
-
-@Composable
-fun MyPlayerPlaybackAndMoodSettingsScreen(
-    myplayerState: MyPlayerUiStateHolder,
-    onBack: () -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().background(MyPlayerBlack).statusBarsPadding(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier.size(42.dp).clip(CircleShape).background(MyPlayerSurface)
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
-            }
-            Spacer(Modifier.height(10.dp))
-            Text("Playback &\nMood Pop-up", fontSize = 30.sp, lineHeight = 35.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-        }
-        item { MyPlayerFunnyVibeCheckSettingsCard(myplayerState = myplayerState) }
-        item { Spacer(Modifier.height(90.dp)) }
-    }
-}

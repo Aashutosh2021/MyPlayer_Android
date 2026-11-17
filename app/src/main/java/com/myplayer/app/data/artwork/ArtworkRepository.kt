@@ -181,15 +181,4 @@ class ArtworkRepository @Inject constructor(
         }
         return null
     }
-
-    suspend fun prefetchBatch(items: List<Pair<String, String>>) = withContext(Dispatchers.IO) {
-        if (!isOnline()) return@withContext emptyList()
-        items.map { (title, artist) ->
-            async {
-                prefetchSemaphore.withPermit {
-                    getArtwork(title, artist)
-                }
-            }
-        }.awaitAll()
-    }
 }

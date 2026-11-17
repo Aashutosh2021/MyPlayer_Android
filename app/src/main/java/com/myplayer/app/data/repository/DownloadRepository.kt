@@ -148,9 +148,6 @@ class DownloadRepository @Inject constructor(
         downloadedSongDao.existsById(videoId)
     }
 
-    fun getDownloadedById(id: String): Flow<List<DownloadedSongEntity>> =
-        downloadedSongDao.searchDownloads(id)
-
     /**
      * Schedules an expedited background download for the given [song] (Offline in-app library).
      */
@@ -589,10 +586,6 @@ class DownloadRepository @Inject constructor(
                 Log.e("DownloadRepository", "Could not delete cached lyrics for $videoId", e)
             }
         }
-    }
-
-    suspend fun insertDownload(song: DownloadedSongEntity) {
-        downloadedSongDao.insert(song)
     }
 
     suspend fun performIntegrityCheck() {

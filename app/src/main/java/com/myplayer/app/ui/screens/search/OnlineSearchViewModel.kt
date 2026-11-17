@@ -28,8 +28,8 @@ import javax.inject.Inject
 class OnlineSearchViewModel @Inject constructor(
     private val searchRepository: OnlineSearchRepository,
     private val downloadRepository: DownloadRepository,
-    private val innertubeApi: InnertubeApi,
-    private val musicController: MusicController,
+    val innertubeApi: InnertubeApi,
+    val musicController: MusicController,
     private val musicRepository: MusicRepository,
     private val playedSongHistoryDao: PlayedSongHistoryDao,
     private val downloadedSongDao: DownloadedSongDao

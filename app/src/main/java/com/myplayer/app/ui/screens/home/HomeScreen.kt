@@ -1259,11 +1259,6 @@ private fun DarkEmptyState() {
     }
 }
 
-fun formatDurationHome(durationMs: Long): String {
-    val s = durationMs / 1000
-    return "%d:%02d".format(s / 60, s % 60)
-}
-
 @Composable
 fun AnimatedEqualizerBars(
     modifier: Modifier = Modifier.size(18.dp),
