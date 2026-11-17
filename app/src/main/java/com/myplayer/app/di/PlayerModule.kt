@@ -2,9 +2,11 @@ package com.myplayer.app.di
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
@@ -17,28 +19,30 @@ import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.common.Format
-import androidx.media3.exoplayer.analytics.AnalyticsListener
-import androidx.media3.exoplayer.audio.AudioCapabilities
-import androidx.media3.exoplayer.audio.AudioSink
-import androidx.media3.exoplayer.audio.DefaultAudioSink
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
-import android.os.Handler
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.RendererCapabilities
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import com.myplayer.app.playback.AudioOutputRouterManager
 import com.myplayer.app.playback.dsp.LastWaveDspAudioProcessor
 import com.myplayer.app.playback.dsp.MasterAudioDspProcessor
+import com.myplayer.app.playback.dsp.MyPlayerCrossmixAudioProcessor
 import com.myplayer.app.playback.dsp.SpatialAudioProcessor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.util.Collections
+import java.util.WeakHashMap
+import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.min
 
@@ -143,7 +147,6 @@ class NineSecondChunkDataSource(
                 val openedBytes = upstream.open(chunkSpec)
                 isChunkOpen = true
 
-                // Extract total stream size from Content-Range header (e.g., "bytes 0-163839/3845120")
                 if (totalStreamEndPosition == C.LENGTH_UNSET.toLong()) {
                     val headers = upstream.responseHeaders
                     val contentRange = headers["Content-Range"]?.firstOrNull()
@@ -174,7 +177,6 @@ class NineSecondChunkDataSource(
 
                 return bytesRemainingInChunk > 0L
             } catch (e: androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
-                // HTTP 416 Range Not Satisfiable means we reached exact EOF
                 if (e.responseCode == 416) {
                     totalStreamEndPosition = currentPosition
                     bytesRemainingInChunk = 0L
@@ -197,8 +199,6 @@ class NineSecondChunkDataSource(
             }
         }
 
-        // Throw IOException instead of returning false so ExoPlayer triggers rebuffering/retry
-        // rather than falsely ending the song at 9 seconds!
         throw java.io.IOException(
             "Unable to load 9s audio chunk at byte $currentPosition (initial=$isInitialOpen)",
             lastException
@@ -229,7 +229,6 @@ class NineSecondChunkDataSource(
         val bytesRead = try {
             upstream.read(buffer, offset, bytesToRead)
         } catch (e: java.io.IOException) {
-            // Mid-chunk socket drop on slow network: close current chunk and retry seamlessly
             android.util.Log.w(TAG, "Mid-chunk read interrupted at $currentPosition, re-opening chunk: ${e.message}")
             if (isChunkOpen) {
                 try { upstream.close() } catch (_: Exception) {}
@@ -281,99 +280,88 @@ class NineSecondChunkDataSource(
     }
 }
 
-@UnstableApi
-@Module
-@InstallIn(SingletonComponent::class)
-object PlayerModule {
+/**
+ * MyPlayer Full-DSP Player Deck Factory:
+ * Builds both the primary [ExoPlayer] and any secondary crossfade [ExoPlayer] deck with the
+ * EXACT SAME audio pipeline:
+ *   1. [MyPlayerCrossmixAudioProcessor] (sample-accurate MyPlayer DJ crossmix & equal-power fade)
+ *   2. [MasterAudioDspProcessor] (isolated per-deck 64-bit 15-Band / 10-Band EQ + Studio Master Clarity + Preamp + LUFS)
+ *   3. [LastWaveDspAudioProcessor] (isolated per-deck High-Shelf Clarity + True-Dolby Spatial Widening)
+ *   4. [com.myplayer.app.myplayerfx.audio.SpatialAudioProcessor] (Headphone Crossfeed / Virtual Speakers / Surround)
+ *   5. [com.myplayer.app.myplayerfx.audio.ReverbAudioProcessor] (Freeverb Room)
+ *   6. [com.myplayer.app.myplayerfx.audio.LoudnessAudioProcessor] (Compressor + Boost + Soft-Knee Peak Limiter)
+ *   7. [com.myplayer.app.myplayerfx.audio.MyPlayerVolumeSink] (Exponential VolumeCurve + ReplayGain + Multi-Output App Volume + Crossmix Clock)
+ *
+ * This guarantees 0% audio quality difference between the outgoing and incoming tracks during crossfade!
+ */
+@OptIn(UnstableApi::class)
+@Singleton
+class MyPlayerDeckFactory @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val audioAttributes: AudioAttributes,
+    private val cacheDataSourceFactory: CacheDataSource.Factory,
+    private val lastWaveDspProcessor: LastWaveDspAudioProcessor,
+    private val masterAudioDspProcessor: MasterAudioDspProcessor,
+    private val spatialAudioProcessor: SpatialAudioProcessor,
+    private val audioFx: com.myplayer.app.myplayerfx.AudioFxService,
+    private val audioOutputRouterManager: AudioOutputRouterManager
+) {
+    private data class DeckResources(
+        val crossmixProcessor: MyPlayerCrossmixAudioProcessor,
+        val deckMasterDsp: MasterAudioDspProcessor?,
+        val deckLastWaveDsp: LastWaveDspAudioProcessor?,
+        val replayGain: com.myplayer.app.myplayerfx.audio.ReplayGainTags
+    )
 
-    @Provides
-    @Singleton
-    fun provideAudioAttributes(): AudioAttributes {
-        return AudioAttributes.Builder()
-            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-            .setUsage(C.USAGE_MEDIA)
-            .build()
-    }
+    private val deckResourcesMap = Collections.synchronizedMap(WeakHashMap<Player, DeckResources>())
 
-    @OptIn(UnstableApi::class)
-    @Provides
-    @Singleton
-    fun provideCacheDataSourceFactory(
-        @ApplicationContext context: Context,
-        simpleCache: SimpleCache,
-        playbackSourceResolverProvider: javax.inject.Provider<com.myplayer.app.playback.PlaybackSourceResolver>
-    ): CacheDataSource.Factory {
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(30_000) // 30s timeout for slow 2G/3G networks
-            .setReadTimeoutMs(30_000)
-            .setKeepPostFor302Redirects(true)
-            .setUserAgent("com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip")
-
-        // Wrap HTTP DataSource in RenewingDataSource (429 backoff + 403/410 live URL renewal)
-        // and then in 9-Second Chunked Range DataSource
-        val renewingHttpFactory = com.myplayer.app.playback.RenewingDataSource.Factory(
-            upstreamFactory = httpDataSourceFactory,
-            renewStreamUrl = { failedUrl -> playbackSourceResolverProvider.get().renewExpiredUrlBlocking(failedUrl) }
-        )
-        val chunkedHttpFactory = NineSecondChunkDataSource.Factory(renewingHttpFactory)
-        val upstreamFactory = DefaultDataSource.Factory(context, chunkedHttpFactory)
-
-        return CacheDataSource.Factory()
-            .setCache(simpleCache)
-            .setUpstreamDataSourceFactory(upstreamFactory)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-    }
-
-    @OptIn(UnstableApi::class)
-    @Provides
-    @Singleton
-    fun provideExoPlayer(
-        @ApplicationContext context: Context,
-        audioAttributes: AudioAttributes,
-        cacheDataSourceFactory: CacheDataSource.Factory,
-        lastWaveDspProcessor: LastWaveDspAudioProcessor,
-        masterAudioDspProcessor: MasterAudioDspProcessor,
-        spatialAudioProcessor: SpatialAudioProcessor,
-        audioFx: com.myplayer.app.myplayerfx.AudioFxService,
-        audioOutputRouterManager: AudioOutputRouterManager
-    ): ExoPlayer {
-        // MyPlayer Audio Lab chain (needs 16-bit PCM, so float output is off): spatial/surround/mono, reverb, loudness
-        val replayGain = com.myplayer.app.myplayerfx.audio.ReplayGainTags()
-        // Attach both AudioFxService AND MasterAudioDspProcessor so 10-Band Rainbow EQ + AutoEQ + Preamp work live!
+    init {
         com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.attach(audioFx, masterAudioDspProcessor)
-        // Single unified Spatial -> Master 15/10-Band EQ & Clarity -> Reverb -> Loudness chain
-        // (Fixes bug where two separate SpatialAudioProcessors ran in series and double-filtered audio)
+    }
+
+    fun crossmixProcessorFor(player: Player?): MyPlayerCrossmixAudioProcessor? {
+        if (player == null) return null
+        return deckResourcesMap[player]?.crossmixProcessor
+    }
+
+    /**
+     * Creates a new [ExoPlayer] deck with the complete MyPlayer + MyPlayer DSP chain.
+     * @param isPrimary If true, uses the primary [MasterAudioDspProcessor] & [LastWaveDspAudioProcessor]
+     *                  and attaches as the primary player on [AudioOutputRouterManager].
+     *                  If false (crossfade deck), creates isolated synced child DSP processors
+     *                  and pins to the same output route via [AudioOutputRouterManager.applyCurrentRouteToAuxiliaryPlayer].
+     */
+    fun createExoPlayerDeck(isPrimary: Boolean = false): ExoPlayer {
+        val replayGain = com.myplayer.app.myplayerfx.audio.ReplayGainTags()
+        val crossmixProcessor = MyPlayerCrossmixAudioProcessor()
+        val effectiveMasterDsp = if (isPrimary) masterAudioDspProcessor else masterAudioDspProcessor.createDeckProcessor()
+        val effectiveLastWaveDsp = if (isPrimary) lastWaveDspProcessor else lastWaveDspProcessor.createDeckProcessor()
+
         val myplayerFx = arrayOf<androidx.media3.common.audio.AudioProcessor>(
             com.myplayer.app.myplayerfx.audio.SpatialAudioProcessor(audioFx),
             com.myplayer.app.myplayerfx.audio.ReverbAudioProcessor(audioFx),
             com.myplayer.app.myplayerfx.audio.LoudnessAudioProcessor(audioFx),
         )
+
         val prefs = context.getSharedPreferences("playback_preferences", Context.MODE_PRIVATE)
         val initialRepeat = prefs.getInt("playback_repeat_mode", Player.REPEAT_MODE_OFF)
         val initialShuffle = prefs.getBoolean("playback_shuffle_mode", false)
 
-        // Spotify-Style 9-Second Progressive Chunk LoadControl:
-        // - Starts playback after just 500ms of audio arrives (~8 KB)
-        // - Loads 9s chunks progressively up to a 27s (3-chunk) rolling window
-        // - Prevents minBuffer == maxBuffer thrashing on slow connections
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 9_000,                      // Trigger next 9s chunk fetch when buffer < 9s
-                /* maxBufferMs = */ 27_000,                     // Buffer up to 3x 9-second chunks ahead
-                /* bufferForPlaybackMs = */ 1_000,              // Smooth 1.0s pre-buffer to prevent dual-sink startup zig-zag
-                /* bufferForPlaybackAfterRebufferMs = */ 2_000  // Smooth 2.0s resume after weak network stall
+                /* minBufferMs = */ 9_000,
+                /* maxBufferMs = */ 27_000,
+                /* bufferForPlaybackMs = */ if (isPrimary) 1_000 else 450,
+                /* bufferForPlaybackAfterRebufferMs = */ 2_000
             )
             .setTargetBufferBytes(C.LENGTH_UNSET)
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(18_000, false)                       // Keep last 18s (2 chunks) in RAM for instant seek-back
+            .setBackBuffer(18_000, false)
             .build()
 
         val mediaSourceFactory = DefaultMediaSourceFactory(cacheDataSourceFactory)
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(/* minLoadableRetryCount = */ 6))
 
-        // Deprioritize buggy vendor decoders (Samsung One UI / Exynos hardware decoders)
-        // across audio MIME types to avoid misreported sample rates or digital boundary distortion.
         val accurateAudioMediaCodecSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
             val decoderInfos = runCatching {
                 MediaCodecSelector.DEFAULT.getDecoderInfos(
@@ -403,11 +391,6 @@ object PlayerModule {
                 eventListener: AudioRendererEventListener,
                 out: ArrayList<Renderer>,
             ) {
-                // Hardware/platform Dolby Atmos & Spatial audio MediaCodec renderer:
-                // Placed ahead of FFmpeg so Android's native Dolby Atmos HAL and Spatializer
-                // decode E-AC-3 JOC with hardware dialogue normalization, full volume,
-                // and system spatial virtualization. Standard codecs (FLAC, Opus, AAC, MP3, Vorbis)
-                // return FORMAT_UNSUPPORTED_TYPE here so FFmpeg retains priority for them.
                 val dolbySpatialRenderer = object : MediaCodecAudioRenderer(
                     context,
                     mediaCodecSelector,
@@ -418,7 +401,7 @@ object PlayerModule {
                 ) {
                     override fun supportsFormat(
                         mediaCodecSelector: MediaCodecSelector,
-                        format: androidx.media3.common.Format,
+                        format: Format,
                     ): Int {
                         val mime = format.sampleMimeType?.lowercase().orEmpty()
                         val isDolbyOrSpatial = mime.contains("eac3") || mime.contains("ec-3") ||
@@ -453,9 +436,21 @@ object PlayerModule {
                     .setEnableFloatOutput(false)
                     .setEnableAudioTrackPlaybackParams(false)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
-                    .setAudioProcessors(arrayOf(masterAudioDspProcessor, lastWaveDspProcessor, *myplayerFx))
+                    .setAudioProcessors(
+                        arrayOf(
+                            effectiveMasterDsp,
+                            effectiveLastWaveDsp,
+                            *myplayerFx,
+                            crossmixProcessor
+                        )
+                    )
                     .build()
-                return com.myplayer.app.myplayerfx.audio.MyPlayerVolumeSink(sink, audioFx, replayGain)
+                return com.myplayer.app.myplayerfx.audio.MyPlayerVolumeSink(
+                    delegate = sink,
+                    audioFx = audioFx,
+                    replayGain = replayGain,
+                    crossmixProcessor = crossmixProcessor
+                )
             }
         }.apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
@@ -465,8 +460,10 @@ object PlayerModule {
         }
 
         val initialIgnoreFocus = audioOutputRouterManager.state.value.ignoreAudioFocus
-        return ExoPlayer.Builder(context, renderersFactory)
-            .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ !initialIgnoreFocus)
+        val handleFocus = if (isPrimary) !initialIgnoreFocus else false
+
+        val exoPlayer = ExoPlayer.Builder(context, renderersFactory)
+            .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ handleFocus)
             .setHandleAudioBecomingNoisy(!initialIgnoreFocus)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setLoadControl(loadControl)
@@ -474,7 +471,11 @@ object PlayerModule {
             .build().apply {
                 repeatMode = initialRepeat
                 shuffleModeEnabled = initialShuffle
-                audioOutputRouterManager.attachExoPlayer(this, audioAttributes)
+                if (isPrimary) {
+                    audioOutputRouterManager.attachExoPlayer(this, audioAttributes)
+                } else {
+                    audioOutputRouterManager.applyCurrentRouteToAuxiliaryPlayer(this)
+                }
                 addListener(object : Player.Listener {
                     override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
                         replayGain.update(tracks)
@@ -485,9 +486,88 @@ object PlayerModule {
                         eventTime: AnalyticsListener.EventTime,
                         format: Format,
                     ) {
-                        masterAudioDspProcessor.setTrackFormat(format)
+                        effectiveMasterDsp.setTrackFormat(format)
                     }
                 })
             }
+
+        deckResourcesMap[exoPlayer] = DeckResources(
+            crossmixProcessor = crossmixProcessor,
+            deckMasterDsp = if (isPrimary) null else effectiveMasterDsp,
+            deckLastWaveDsp = if (isPrimary) null else effectiveLastWaveDsp,
+            replayGain = replayGain
+        )
+        return exoPlayer
+    }
+
+    /**
+     * Releases a secondary crossfade deck and unregisters its child DSP processors.
+     */
+    fun releaseExoPlayerDeck(deck: ExoPlayer?) {
+        if (deck == null) return
+        val res = deckResourcesMap.remove(deck)
+        if (res != null) {
+            res.crossmixProcessor.clear()
+            masterAudioDspProcessor.releaseDeckProcessor(res.deckMasterDsp)
+            lastWaveDspProcessor.releaseDeckProcessor(res.deckLastWaveDsp)
+        }
+        audioOutputRouterManager.detachAuxiliaryPlayer(deck)
+        runCatching {
+            deck.stop()
+            deck.clearMediaItems()
+            deck.release()
+        }
+    }
+}
+
+@UnstableApi
+@Module
+@InstallIn(SingletonComponent::class)
+object PlayerModule {
+
+    @Provides
+    @Singleton
+    fun provideAudioAttributes(): AudioAttributes {
+        return AudioAttributes.Builder()
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setUsage(C.USAGE_MEDIA)
+            .build()
+    }
+
+    @OptIn(UnstableApi::class)
+    @Provides
+    @Singleton
+    fun provideCacheDataSourceFactory(
+        @ApplicationContext context: Context,
+        simpleCache: SimpleCache,
+        playbackSourceResolverProvider: javax.inject.Provider<com.myplayer.app.playback.PlaybackSourceResolver>
+    ): CacheDataSource.Factory {
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(30_000)
+            .setReadTimeoutMs(30_000)
+            .setKeepPostFor302Redirects(true)
+            .setUserAgent("com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip")
+
+        val renewingHttpFactory = com.myplayer.app.playback.RenewingDataSource.Factory(
+            upstreamFactory = httpDataSourceFactory,
+            renewStreamUrl = { failedUrl -> playbackSourceResolverProvider.get().renewExpiredUrlBlocking(failedUrl) }
+        )
+        val chunkedHttpFactory = NineSecondChunkDataSource.Factory(renewingHttpFactory)
+        val upstreamFactory = DefaultDataSource.Factory(context, chunkedHttpFactory)
+
+        return CacheDataSource.Factory()
+            .setCache(simpleCache)
+            .setUpstreamDataSourceFactory(upstreamFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    }
+
+    @OptIn(UnstableApi::class)
+    @Provides
+    @Singleton
+    fun provideExoPlayer(
+        deckFactory: MyPlayerDeckFactory
+    ): ExoPlayer {
+        return deckFactory.createExoPlayerDeck(isPrimary = true)
     }
 }

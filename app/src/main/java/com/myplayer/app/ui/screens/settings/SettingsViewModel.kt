@@ -18,6 +18,7 @@ import com.myplayer.app.data.preferences.StreamQuality
 import com.myplayer.app.data.recognize.ShazamRecognizer
 import com.myplayer.app.data.repository.DownloadRepository
 import com.myplayer.app.data.sponsorblock.SponsorBlockManager
+import com.myplayer.app.data.update.InAppUpdateManager
 import com.myplayer.app.data.update.NoInternetException
 import com.myplayer.app.data.update.UpdateChecker
 import com.myplayer.app.data.update.UpdateInfo
@@ -60,7 +61,8 @@ class SettingsViewModel @Inject constructor(
     private val downloadRepository: DownloadRepository,
     private val preferencesManager: PreferencesManager,
     private val backupRestoreManager: BackupRestoreManager,
-    private val updateChecker: UpdateChecker,
+    val updateChecker: UpdateChecker,
+    val inAppUpdateManager: InAppUpdateManager,
     val spotifyManager: com.myplayer.app.data.spotify.SpotifyIntegrationManager,
     val youtubeManager: com.myplayer.app.data.youtube.YouTubeIntegrationManager,
     private val audioSettingsRepository: AudioSettingsRepository,

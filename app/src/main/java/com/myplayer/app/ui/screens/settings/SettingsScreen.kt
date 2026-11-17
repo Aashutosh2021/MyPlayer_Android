@@ -132,6 +132,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.myplayer.app.BuildConfig
 import com.myplayer.app.data.update.UpdateChecker
+import com.myplayer.app.ui.components.MyPlayerInAppUpdateSheet
 import com.myplayer.app.ui.components.WhatsNewDialog
 import com.myplayer.app.ui.myplayer.MyPlayerAccentGreen
 import com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge
@@ -834,65 +835,15 @@ fun SettingsScreen(
             )
         }
         is ManualUpdateState.Available -> {
-            AlertDialog(
-                onDismissRequest = { viewModel.resetUpdateState() },
-                containerColor = MaterialTheme.colorScheme.surface,
-                titleContentColor = MaterialTheme.colorScheme.onSurface,
-                textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                shape = RoundedCornerShape(24.dp),
-                title = { Text("Update Available", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
-                text = {
-                    Column {
-                        Text(
-                            "A newer version (${state.updateInfo.versionName}) is available!",
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Visit our official website to download the latest update.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (state.updateInfo.releaseNotes.isNotBlank()) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                state.updateInfo.releaseNotes.take(300),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+            MyPlayerInAppUpdateSheet(
+                updateInfo = state.updateInfo,
+                inAppUpdateManager = viewModel.inAppUpdateManager,
+                userName = userName,
+                onSnooze24h = {
+                    viewModel.updateChecker.snoozeUpdateFor24Hours(state.updateInfo.versionName)
+                    viewModel.resetUpdateState()
                 },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            viewModel.resetUpdateState()
-                            val intent = Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse(state.updateInfo.releaseUrl)
-                            ).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(intent)
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Update Now", fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { viewModel.resetUpdateState() },
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                    ) {
-                        Text("Later")
-                    }
-                }
+                onDismiss = { viewModel.resetUpdateState() }
             )
         }
         ManualUpdateState.UpToDate -> {
@@ -1754,14 +1705,34 @@ fun SettingsScreen(
             categoryKey = "about",
             categoryTitle = "About",
             groupTitle = "Updates",
-            title = "Check for Updates",
-            summary = "Check official website & GitHub for new releases",
+            title = "In-App Updater & Check for Updates",
+            summary = "Download and install new MyPlayer APK releases directly inside the app",
             render = {
                 OpenTuneNavRow(
-                    title = "Check for updates",
-                    summary = "Check official website & GitHub for new releases",
+                    title = "Check for updates (In-App Installer)",
+                    summary = "Download & install new APK updates directly inside MyPlayer",
                     icon = Icons.Filled.SystemUpdate,
                     onClick = { viewModel.checkForUpdates() }
+                )
+            }
+        ),
+        SearchableSettingEntry(
+            categoryKey = "about",
+            categoryTitle = "About",
+            groupTitle = "Updates",
+            title = "Include Beta & Nightly Releases",
+            summary = "Check GitHub pre-release / beta builds in the in-app updater",
+            render = {
+                var betaEnabled by remember { mutableStateOf(viewModel.updateChecker.includeBetaReleases) }
+                OpenTuneToggleRow(
+                    title = "Include Beta & Nightly Updates",
+                    summary = "Receive bleeding-edge pre-release APK builds inside the app",
+                    icon = Icons.Filled.Download,
+                    checked = betaEnabled,
+                    onChange = {
+                        betaEnabled = it
+                        viewModel.updateChecker.includeBetaReleases = it
+                    }
                 )
             }
         ),

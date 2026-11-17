@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="shared_lyrics" path="shared_lyrics/" />
+    <cache-path name="apk_cache" path="." />
+    <external-cache-path name="external_cache" path="." />
+    <external-files-path name="myplayer_updates" path="Download/myplayer_updates/" />
+    <external-files-path name="external_files_root" path="." />
+    <external-path name="external_files" path="." />
+    <files-path name="internal_files" path="." />
 </paths>

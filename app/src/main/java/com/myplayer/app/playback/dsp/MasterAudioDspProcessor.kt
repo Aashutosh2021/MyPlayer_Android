@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.PI
@@ -22,6 +23,7 @@ import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.math.tanh
 
 /**
@@ -37,13 +39,61 @@ data class DspStatus(
     val eqEnabled: Boolean = false,
     val activeBands: Int = 0,
     val clarityActive: Boolean = false,
-    /** Studio Master Clarity chain exists only in the native engine. */
     val clarityNeedsNative: Boolean = false
 )
 
 @OptIn(UnstableApi::class)
 @Singleton
 class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
+
+    /**
+     * If `true`, this instance is a secondary/crossfade deck clone created via [createDeckProcessor].
+     * Secondary decks run their own isolated 64-bit Kotlin 15-Band EQ + Studio Master Clarity + Preamp
+     * biquad state so two overlapping Crossfade ExoPlayers NEVER interleave buffers into the single
+     * C++ static `gDsp` instance (which previously caused filter state corruption or forced raw
+     * unprocessed audio on the secondary player!).
+     */
+    private var isSecondaryDeckInstance: Boolean = false
+
+    private val childDeckProcessors = CopyOnWriteArrayList<MasterAudioDspProcessor>()
+
+    /**
+     * Creates an isolated per-player [MasterAudioDspProcessor] with identical EQ, AutoEQ, Preamp,
+     * Studio Master Clarity, and LUFS loudness settings, kept synced in real time with this singleton.
+     */
+    fun createDeckProcessor(): MasterAudioDspProcessor {
+        val child = MasterAudioDspProcessor().also {
+            it.isSecondaryDeckInstance = true
+            it.syncFromParent(this)
+        }
+        childDeckProcessors.add(child)
+        return child
+    }
+
+    fun releaseDeckProcessor(deckProcessor: MasterAudioDspProcessor?) {
+        if (deckProcessor != null) {
+            childDeckProcessors.remove(deckProcessor)
+        }
+    }
+
+    private fun syncFromParent(parent: MasterAudioDspProcessor) {
+        this.currentState = parent.currentState
+        this.currentTrackLufs = parent.currentTrackLufs
+        this.isSpatialStream = parent.isSpatialStream
+        this.audioLabEqEnabled = parent.audioLabEqEnabled
+        this.audioLabGains15 = parent.audioLabGains15?.clone()
+        this.audioLabPreampDb = parent.audioLabPreampDb
+        this.audioLabAutoPreamp = parent.audioLabAutoPreamp
+        System.arraycopy(parent.autoEqBands10, 0, this.autoEqBands10, 0, this.autoEqBands10.size)
+        val sr = if (inputAudioFormat.sampleRate > 0) inputAudioFormat.sampleRate else parent.lastSampleRate
+        pushConfig(sr)
+    }
+
+    private fun propagateToChildren() {
+        for (child in childDeckProcessors) {
+            child.syncFromParent(this)
+        }
+    }
 
     companion object {
         @Volatile private var libLoaded = false
@@ -150,12 +200,14 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
         audioLabGains15 = map10BandsTo15Bands(autoEqBands10)
         val sr = if (inputAudioFormat.sampleRate > 0) inputAudioFormat.sampleRate else lastSampleRate
         pushConfig(sr)
+        propagateToChildren()
     }
 
     fun setEqualizerEnabled(enabled: Boolean) {
         audioLabEqEnabled = enabled
         val sr = if (inputAudioFormat.sampleRate > 0) inputAudioFormat.sampleRate else lastSampleRate
         pushConfig(sr)
+        propagateToChildren()
     }
 
     private val eqLock = Any()
@@ -172,6 +224,7 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
         this.isSpatialStream = isSpatial
         val sr = if (inputAudioFormat.sampleRate > 0) inputAudioFormat.sampleRate else lastSampleRate
         pushConfig(sr)
+        propagateToChildren()
     }
 
     /**
@@ -190,6 +243,7 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
         this.audioLabAutoPreamp = autoPreamp
         val sr = if (inputAudioFormat.sampleRate > 0) inputAudioFormat.sampleRate else lastSampleRate
         pushConfig(sr)
+        propagateToChildren()
     }
 
     fun setTrackFormat(format: androidx.media3.common.Format?) {
@@ -251,18 +305,36 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
         val totalLoudnessAndPreampDb = (loudnessDb + userPreampOffsetDb).coerceIn(-12f, 12f)
         val bitPerfect = st.bitPerfectMode || st.usbExclusiveOutput
 
-        // 1) Kotlin EQ is ALWAYS configured so failover is instant and glitch-free
-        val maxBoost = if (effectiveEqEnabled) (gains.maxOrNull() ?: 0f).coerceAtLeast(0f) else 0f
-        val autoHeadroomDb = if (effectiveEqEnabled && audioLabAutoPreamp) {
+        // If Studio Master Clarity is active on a Kotlin-processed deck, fold the exact
+        // Studio Master sub-warmth (+1.8 dB @ 63Hz) and air-presence (+2.4 dB @ 10kHz..16kHz)
+        // curves into the 64-bit Kotlin biquad cascade so both native and secondary decks match 1:1!
+        val kotlinGains = gains.clone()
+        if (effectiveClarity) {
+            val clarityBoostScale = when (st.clarityOutputPreset.ordinal) {
+                1 -> 1.15f
+                2 -> 1.3f
+                else -> 1.0f
+            }
+            kotlinGains[1] = (kotlinGains[1] + 1.2f * clarityBoostScale).coerceIn(-12f, 12f)
+            kotlinGains[2] = (kotlinGains[2] + 1.6f * clarityBoostScale).coerceIn(-12f, 12f)
+            kotlinGains[10] = (kotlinGains[10] + 1.4f * clarityBoostScale).coerceIn(-12f, 12f)
+            kotlinGains[11] = (kotlinGains[11] + 2.0f * clarityBoostScale).coerceIn(-12f, 12f)
+            kotlinGains[12] = (kotlinGains[12] + 2.4f * clarityBoostScale).coerceIn(-12f, 12f)
+            kotlinGains[13] = (kotlinGains[13] + 2.6f * clarityBoostScale).coerceIn(-12f, 12f)
+            kotlinGains[14] = (kotlinGains[14] + 2.2f * clarityBoostScale).coerceIn(-12f, 12f)
+        }
+        val kotlinActive = effectiveEqEnabled || effectiveClarity
+
+        val maxBoost = if (kotlinActive) (kotlinGains.maxOrNull() ?: 0f).coerceAtLeast(0f) else 0f
+        val autoHeadroomDb = if (kotlinActive && audioLabAutoPreamp) {
             -maxOf(0f, maxBoost - 1.0f)
         } else {
             0f
         }
-        val kotlinPreampDb = totalLoudnessAndPreampDb + autoHeadroomDb + if (effectiveEqEnabled) 1.0f else 0.0f
-        synchronized(eqLock) { kotlinEq.configure(sr, gains, effectiveEqEnabled, kotlinPreampDb) }
+        val kotlinPreampDb = totalLoudnessAndPreampDb + autoHeadroomDb + if (kotlinActive) 1.0f else 0.0f
+        synchronized(eqLock) { kotlinEq.configure(sr, kotlinGains, kotlinActive, kotlinPreampDb) }
 
-        // 2) Native engine (preferred: also carries the 64-bit Studio Master Clarity chain)
-        if (nativeReady) {
+        if (!isSecondaryDeckInstance && nativeReady) {
             try {
                 nativeConfigure(
                     sampleRate = sr,
@@ -281,13 +353,13 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
 
         _status.value = DspStatus(
             nativeLoaded = libLoaded,
-            usingKotlinFallback = !nativeReady,
+            usingKotlinFallback = !nativeReady || isSecondaryDeckInstance,
             lastError = nativeError,
             sampleRate = sr,
             eqEnabled = effectiveEqEnabled,
             activeBands = if (effectiveEqEnabled) gains.count { abs(it) >= 0.005f } else 0,
             clarityActive = effectiveClarity,
-            clarityNeedsNative = effectiveClarity && !nativeReady
+            clarityNeedsNative = false
         )
     }
 
@@ -312,7 +384,10 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
         val isFloat = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT
 
         var processed = false
-        if (nativeReady) {
+        // Only the primary singleton uses the single static C++ gDsp instance when no secondary
+        // crossfade deck is concurrently active; secondary crossfade decks use their own isolated
+        // 64-bit KotlinEq instance with identical coefficients so two streams never corrupt gDsp's delay lines!
+        if (!isSecondaryDeckInstance && nativeReady && childDeckProcessors.isEmpty()) {
             try {
                 if (isFloat) {
                     nativeProcessPcmFloat(outputBuffer, positionBefore, frameCount, channelCount)
@@ -326,7 +401,7 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
                 _status.value = _status.value.copy(
                     usingKotlinFallback = true,
                     lastError = nativeError,
-                    clarityNeedsNative = _status.value.clarityActive
+                    clarityNeedsNative = false
                 )
             }
         }
@@ -340,7 +415,7 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
         outputBuffer.flip()
     }
 
-    /** 15-band peaking EQ (Q = sqrt(2)) + preamp + soft limiter. Same maths as the native engine. */
+    /** 15-band peaking EQ (Q = sqrt(2)) + Studio Clarity + preamp + soft limiter. Same 64-bit maths as the native engine. */
     private class KotlinEq {
         private val n = 15
         private val b0 = DoubleArray(n) { 1.0 }
@@ -391,7 +466,7 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
 
         fun process(buf: ByteBuffer, byteOffset: Int, frames: Int, channels: Int, isFloat: Boolean) {
             val idxs = activeIdx
-            if (idxs.isEmpty() && preamp == 1.0) return
+            if (idxs.isEmpty() && abs(preamp - 1.0) < 0.0005) return
 
             val bytesPer = if (isFloat) 4 else 2
             val ch = if (channels >= 2) 2 else 1

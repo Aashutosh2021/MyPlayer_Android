@@ -7,6 +7,7 @@ import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import com.myplayer.app.data.preferences.ClarityPreset
 import java.nio.ByteBuffer
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.cos
@@ -23,6 +24,27 @@ class LastWaveDspAudioProcessor @Inject constructor() : BaseAudioProcessor() {
     @Volatile private var spatialWidth: Float = 0.45f
     @Volatile var isDualBudActive: Boolean = false // DualBud safety flag!
 
+    private val childDeckProcessors = CopyOnWriteArrayList<LastWaveDspAudioProcessor>()
+
+    /**
+     * Creates an isolated per-player [LastWaveDspAudioProcessor] with identical Clarity High-Shelf
+     * Biquad & True-Dolby Spatial Widening settings so crossfade decks never drop quality or share filter state.
+     */
+    fun createDeckProcessor(): LastWaveDspAudioProcessor {
+        val child = LastWaveDspAudioProcessor().also {
+            it.isDualBudActive = this.isDualBudActive
+            it.updateDspConfig(this.clarityPreset, this.trueDolbyEnabled, this.spatialWidth)
+        }
+        childDeckProcessors.add(child)
+        return child
+    }
+
+    fun releaseDeckProcessor(deckProcessor: LastWaveDspAudioProcessor?) {
+        if (deckProcessor != null) {
+            childDeckProcessors.remove(deckProcessor)
+        }
+    }
+
     // Biquad High-Shelf Filter state (Left & Right channels)
     private var x1L = 0f; private var x2L = 0f; private var y1L = 0f; private var y2L = 0f
     private var x1R = 0f; private var x2R = 0f; private var y1R = 0f; private var y2R = 0f
@@ -34,6 +56,10 @@ class LastWaveDspAudioProcessor @Inject constructor() : BaseAudioProcessor() {
         this.spatialWidth = width.coerceIn(0f, 1f)
         if (inputAudioFormat.sampleRate > 0) {
             calculateHighShelfCoeffs(inputAudioFormat.sampleRate, 3800f, preset.highShelfGainDb)
+        }
+        for (child in childDeckProcessors) {
+            child.isDualBudActive = this.isDualBudActive
+            child.updateDspConfig(preset, dolby, width)
         }
     }
 

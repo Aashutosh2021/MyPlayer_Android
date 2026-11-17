@@ -20925,11 +20925,21 @@ fun MyPlayerAudioFxScreen(
                     CrossfadeWaveformGraphic(labelLeft = "Outgoing Track", labelRight = "Incoming Track")
                     Spacer(Modifier.height(14.dp))
                     MyPlayerSwitchRow(
-                        title = "Apple-Style Auto Crossfade",
-                        subtitle = "Dual-deck equal-power S-curve overlap between tracks (online & offline)",
-                        checked = myplayerState.autoCrossfade || myplayerState.manualCrossfade,
+                        title = "MyPlayer Smooth Crossfade",
+                        subtitle = "Zero-dropout dual-deck full-DSP transition with sample-locked clock",
+                        checked = myplayerState.autoCrossfade,
                         onCheckedChange = {
                             myplayerState.autoCrossfade = it
+                            MyPlayerAudioFxDspBridge.syncFromUiState(myplayerState)
+                            myplayerState.saveAudioLabToPrefs()
+                        }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    MyPlayerSwitchRow(
+                        title = "Blend Manual Skips",
+                        subtitle = "Crossfade smoothly even when manually tapping Next or selecting a song",
+                        checked = myplayerState.manualCrossfade,
+                        onCheckedChange = {
                             myplayerState.manualCrossfade = it
                             MyPlayerAudioFxDspBridge.syncFromUiState(myplayerState)
                             myplayerState.saveAudioLabToPrefs()
@@ -20949,6 +20959,51 @@ fun MyPlayerAudioFxScreen(
                                     myplayerState.saveAudioLabToPrefs()
                                 }
                             )
+                            Spacer(Modifier.height(10.dp))
+                            val fxContext = LocalContext.current
+                            var selectedCrossmixStyle by remember {
+                                mutableStateOf(MyPlayerAudioFxDspBridge.crossmixStyle)
+                            }
+                            Text(
+                                text = "Crossmix Style: ${selectedCrossmixStyle.label}",
+                                color = MyPlayerTextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                com.myplayer.app.playback.dsp.MyPlayerCrossmixStyle.entries.forEach { styleOption ->
+                                    val isSelected = selectedCrossmixStyle == styleOption
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = if (isSelected) MyPlayerAccentGreen.copy(alpha = 0.22f) else MyPlayerSurfaceHigh,
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isSelected) MyPlayerAccentGreen else MyPlayerCardBorder
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                selectedCrossmixStyle = styleOption
+                                                MyPlayerAudioFxDspBridge.crossmixStyle = styleOption
+                                                MyPlayerAudioFxDspBridge.saveFineTune(fxContext)
+                                            }
+                                    ) {
+                                        Text(
+                                            text = styleOption.label.substringBefore(" "),
+                                            color = if (isSelected) MyPlayerAccentGreen else MyPlayerTextPrimary,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            modifier = Modifier.padding(vertical = 7.dp, horizontal = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     Spacer(Modifier.height(10.dp))

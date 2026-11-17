@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest 
-    
     xmlns:android="http://schemas.android.com/apk/res/android"
-    
     xmlns:tools="http://schemas.android.com/tools">
     <!-- Network access for online search and streaming -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -12,6 +10,8 @@
     <!-- Wake lock for ExoPlayer WAKE_MODE_NETWORK during screen-off playback -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- In-App APK Update Installation Permission (ported from MyPlayer) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Foreground service for music playback -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />

@@ -58,7 +58,8 @@ class MusicController @Inject constructor(
     private val downloadedSongDao: DownloadedSongDao,
     private val playedSongHistoryDao: PlayedSongHistoryDao,
     private val playbackSourceResolver: PlaybackSourceResolver,
-    private val mediaItemFactory: MediaItemFactory
+    private val mediaItemFactory: MediaItemFactory,
+    private val audioFeatureManagers: AudioFeatureManagers
 ) : PlaybackRouterDelegate {
     // IMPORTANT: MediaController.verifyApplicationThread() enforces that ALL MediaController
     // API calls (currentPosition, duration, seekTo, play, pause, setMediaItem, etc.) must
@@ -249,7 +250,7 @@ class MusicController @Inject constructor(
                         }
                     }
 
-                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && !audioFeatureManagers.isCrossfading) {
                         playbackHistory.clear()
                         lastIndex = resolvedQueueIdx
                         isNavigatingHistory = false
@@ -1054,8 +1055,10 @@ class MusicController @Inject constructor(
 
         playbackStateManager.updateCurrentSong(targetEntity)
         playbackStateManager.updateCurrentOnlineSong(onlineSong)
-        playbackStateManager.updatePosition(0L)
-        playbackStateManager.updateDuration(targetEntity.duration)
+        if (!audioFeatureManagers.shouldKeepOutgoingPlayingOnResolve) {
+            playbackStateManager.updatePosition(0L)
+            playbackStateManager.updateDuration(targetEntity.duration)
+        }
 
         val requests = _songQueue.map { entity ->
             val entityVid = entity.videoId ?: entity.id
@@ -1474,6 +1477,9 @@ class MusicController @Inject constructor(
     }
 
     override fun onStreamResolving(request: PlayRequest) {
+        if (audioFeatureManagers.shouldKeepOutgoingPlayingOnResolve) {
+            return
+        }
         // Immediately pause previous song so old audio NEVER plays under the new song's artwork!
         Handler(Looper.getMainLooper()).post {
             try {

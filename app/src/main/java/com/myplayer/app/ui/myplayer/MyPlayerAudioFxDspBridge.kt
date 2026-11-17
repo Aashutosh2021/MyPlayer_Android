@@ -10,12 +10,13 @@ import com.myplayer.app.myplayerfx.audio.VolumeCurve
 import com.myplayer.app.myplayerfx.audio.SpatialMode
 import com.myplayer.app.myplayerfx.audio.SpatialParams
 import com.myplayer.app.playback.dsp.MasterAudioDspProcessor
+import com.myplayer.app.playback.dsp.MyPlayerCrossmixStyle
 import kotlin.math.pow
 
 /**
  * Real-time Audio Lab DSP Bridge.
  * Connects the Compose Audio Lab UI (10-Band Rainbow Equalizer, AutoEQ, Reverb, Loudness,
- * Spatial 3D, Dolby Atmos Surround, Playback Speed/Pitch, Exponential Volume, and Apple-style
+ * Spatial 3D, Dolby Atmos Surround, Playback Speed/Pitch, Exponential Volume, and MyPlayer
  * Crossfade) directly to [MasterAudioDspProcessor], [AudioFxService], and [MusicService].
  */
 object MyPlayerAudioFxDspBridge {
@@ -56,9 +57,11 @@ object MyPlayerAudioFxDspBridge {
     /** MyPlayer volume curve (power 2), applied by MyPlayerVolumeSink. */
     @Volatile var exponentialVolumeEnabled: Boolean = false
 
-    // ---- 4. Apple-Style Crossfade & Pause Fade ----
-    @Volatile var crossfadeEnabled: Boolean = false
+    // ---- 4. MyPlayer Smooth Crossfade, Crossmix Style & Pause Fade ----
+    @Volatile var crossfadeEnabled: Boolean = true
+    @Volatile var manualCrossfadeEnabled: Boolean = false
     @Volatile var crossfadeSeconds: Float = 5.0f
+    @Volatile var crossmixStyle: MyPlayerCrossmixStyle = MyPlayerCrossmixStyle.SilkBlend
     @Volatile var keepGaplessAlbums: Boolean = true
     @Volatile var pauseFadeEnabled: Boolean = true
     @Volatile var pauseFadeSeconds: Float = 2.0f
@@ -150,10 +153,11 @@ object MyPlayerAudioFxDspBridge {
         exponentialVolumeEnabled = state.exponentialVolume
 
         // Sync Crossfade settings from Audio Lab / Onboarding / Tour
-        val xfadeOn = state.autoCrossfade || state.manualCrossfade
+        val xfadeOn = state.autoCrossfade
         val xfadeSec = state.crossfadeLengthSec.coerceIn(1f, 12f)
         val xfadeChanged = (xfadeOn != crossfadeEnabled) || (xfadeSec != crossfadeSeconds)
         crossfadeEnabled = xfadeOn
+        manualCrossfadeEnabled = state.manualCrossfade
         crossfadeSeconds = xfadeSec
         keepGaplessAlbums = state.keepGaplessAlbums
         pauseFadeEnabled = state.enablePauseFade
@@ -187,6 +191,7 @@ object MyPlayerAudioFxDspBridge {
             .putFloat("fx_loud_boost", loudnessBoostDb)
             .putFloat("fx_loud_comp", loudnessCompression)
             .putFloat("fx_speaker_angle", speakerAngleDeg)
+            .putString("fx_myplayer_crossmix_style", crossmixStyle.name)
             .apply()
     }
 
@@ -199,6 +204,14 @@ object MyPlayerAudioFxDspBridge {
         loudnessBoostDb = p.getFloat("fx_loud_boost", loudnessBoostDb)
         loudnessCompression = p.getFloat("fx_loud_comp", loudnessCompression)
         speakerAngleDeg = p.getFloat("fx_speaker_angle", speakerAngleDeg)
+        crossfadeEnabled = p.getBoolean("al_auto_xfade", crossfadeEnabled)
+        manualCrossfadeEnabled = p.getBoolean("al_manual_xfade", manualCrossfadeEnabled)
+        crossfadeSeconds = p.getFloat("al_xfade_len", crossfadeSeconds).coerceIn(1f, 12f)
+        keepGaplessAlbums = p.getBoolean("al_gapless_albums", keepGaplessAlbums)
+        val savedStyle = p.getString("fx_myplayer_crossmix_style", null)
+        if (!savedStyle.isNullOrBlank()) {
+            runCatching { MyPlayerCrossmixStyle.valueOf(savedStyle) }.getOrNull()?.let { crossmixStyle = it }
+        }
         pushFx()
         pushEqToMasterDsp()
     }

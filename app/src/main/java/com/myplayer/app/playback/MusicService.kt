@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -34,6 +35,9 @@ class MusicService : MediaSessionService() {
 
     @Inject
     lateinit var player: ExoPlayer
+
+    @Inject
+    lateinit var audioAttributes: AudioAttributes
 
     @Inject
     lateinit var playbackStateManager: PlaybackStateManager
@@ -74,33 +78,157 @@ class MusicService : MediaSessionService() {
 
     private var loudnessEnhancer: android.media.audiofx.LoudnessEnhancer? = null
     private var loudnessSessionId: Int = C.AUDIO_SESSION_ID_UNSET
+    // Ported from MyPlayer: keeps the outgoing song's LoudnessEnhancer alive on its own
+    // audioSessionId until the crossfade finishes so the outgoing track never drops loudness mid-fade!
+    private var fadingLoudnessEnhancer: android.media.audiofx.LoudnessEnhancer? = null
+
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var mediaSession: MediaSession? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
-    override fun onCreate() {
-        super.onCreate()
-
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "MyPlayer:MusicServiceWakeLock"
-        ).apply { setReferenceCounted(false) }
-
-        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        val wifiLockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
-        } else {
-            @Suppress("DEPRECATION")
-            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+    private val servicePlayerListener = object : Player.Listener {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            super.onMediaItemTransition(mediaItem, reason)
+            playbackStateManager.currentOnlineSong.value?.let { online ->
+                val tier = currentAudioPlaybackState.streamingQuality
+                val preferLossless = tier != com.myplayer.app.data.preferences.AudioQualityTier.YOUTUBE_MUSIC &&
+                    tier != com.myplayer.app.data.preferences.AudioQualityTier.DATA_SAVER
+                upgradeHandoffManager.scheduleMidStreamUpgrade(
+                    scope = serviceScope,
+                    player = player,
+                    videoId = online.videoId,
+                    title = online.title,
+                    artist = online.artist,
+                    durationMs = online.durationMs,
+                    preferLossless = preferLossless
+                )
+            }
         }
-        wifiLock = wifiManager.createWifiLock(wifiLockMode, "MyPlayer:MusicServiceWifiLock").apply {
-            setReferenceCounted(false)
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            super.onIsPlayingChanged(isPlaying)
+            updateServiceLocks(isPlaying || player.playWhenReady)
         }
 
-        val forwardingPlayer = object : androidx.media3.common.ForwardingPlayer(player) {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            super.onPlaybackStateChanged(playbackState)
+            val active = player.playWhenReady &&
+                (playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_READY)
+            if (active) {
+                acquireLocks()
+            }
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            super.onRepeatModeChanged(repeatMode)
+            if (repeatMode == Player.REPEAT_MODE_OFF && playbackStateManager.repeatMode.value == Player.REPEAT_MODE_ALL) {
+                return
+            }
+            getSharedPreferences("playback_preferences", Context.MODE_PRIVATE)
+                .edit().putInt("playback_repeat_mode", repeatMode).apply()
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            super.onShuffleModeEnabledChanged(shuffleModeEnabled)
+            getSharedPreferences("playback_preferences", Context.MODE_PRIVATE)
+                .edit().putBoolean("playback_shuffle_mode", shuffleModeEnabled).apply()
+        }
+
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            super.onAudioSessionIdChanged(audioSessionId)
+            val allowSystemFx = currentAudioPlaybackState.systemAudioEffects &&
+                !audioOutputRouterManager.isSplitRoutingActive
+            audioFeatureManagers.toggleSystemAudioEffects(audioSessionId, allowSystemFx)
+            serviceScope.launch {
+                val config = audioSettingsRepository.configFlow.firstOrNull()
+                if (config != null) {
+                    updateLoudnessEnhancer(
+                        enabled = config.loudnessNormalize && !audioOutputRouterManager.isSplitRoutingActive,
+                        gainMb = config.loudnessGainMb
+                    )
+                }
+            }
+        }
+    }
+
+    private val crossfadeHost = object : MyPlayerCrossfadeHost {
+        override val activePlayer: ExoPlayer
+            get() = this@MusicService.player
+
+        override fun promoteIncomingDeck(incoming: ExoPlayer, outgoing: ExoPlayer) {
+            outgoing.removeListener(servicePlayerListener)
+            this@MusicService.player = incoming
+            incoming.addListener(servicePlayerListener)
+
+            // Attach SponsorBlock & AudioOutputRouter to the newly promoted incoming player
+            audioOutputRouterManager.attachExoPlayer(incoming, audioAttributes)
+            sponsorBlockManager.attachToPlayer(
+                scope = serviceScope,
+                player = incoming,
+                currentVideoIdProvider = {
+                    playbackStateManager.currentOnlineSong.value?.videoId
+                        ?: playbackStateManager.currentSong.value?.id?.takeIf { it.startsWith("online://") }
+                }
+            )
+
+            // Open system audio effects & LoudnessEnhancer on the incoming player's audioSessionId
+            // while keeping the outgoing player's session alive until it finishes fading out!
+            val allowSystemFx = currentAudioPlaybackState.systemAudioEffects &&
+                !audioOutputRouterManager.isSplitRoutingActive
+            if (incoming.audioSessionId != C.AUDIO_SESSION_ID_UNSET && incoming.audioSessionId > 0) {
+                audioFeatureManagers.toggleSystemAudioEffects(incoming.audioSessionId, allowSystemFx)
+            }
+            serviceScope.launch {
+                val config = audioSettingsRepository.configFlow.firstOrNull()
+                if (config != null) {
+                    updateLoudnessEnhancer(
+                        enabled = config.loudnessNormalize && !audioOutputRouterManager.isSplitRoutingActive,
+                        gainMb = config.loudnessGainMb
+                    )
+                }
+            }
+
+            runCatching {
+                mediaSession?.player = buildForwardingPlayer(incoming)
+            }
+        }
+
+        override fun onOutgoingDeckReleased(outgoing: ExoPlayer) {
+            runCatching { outgoing.removeListener(servicePlayerListener) }
+            if (outgoing.audioSessionId != C.AUDIO_SESSION_ID_UNSET && outgoing.audioSessionId > 0) {
+                audioFeatureManagers.toggleSystemAudioEffects(outgoing.audioSessionId, false)
+            }
+            fadingLoudnessEnhancer?.let { oldEnhancer ->
+                runCatching { oldEnhancer.release() }
+            }
+            fadingLoudnessEnhancer = null
+        }
+
+        override fun requestNextTrackFromController() {
+            playbackEventBus.emit(PlaybackEvent.SkipToNextRequested)
+        }
+    }
+
+    private fun shouldCrossfadeIncomingSetMediaItems(targetDeck: ExoPlayer): Boolean {
+        if (targetDeck !== this.player) return false
+        if (audioFeatureManagers.awaitingOnlineCrossfadeNext &&
+            (targetDeck.isPlaying || targetDeck.playWhenReady || targetDeck.playbackState == Player.STATE_READY)
+        ) {
+            return true
+        }
+        // Also support MyPlayer "Blend Skips" (Manual Crossfade) when enabled in Audio Lab
+        val manualBlendOn = com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.manualCrossfadeEnabled &&
+            !audioFeatureManagers.isCrossfading &&
+            (targetDeck.isPlaying || targetDeck.playWhenReady) &&
+            targetDeck.currentPosition > 1_000L &&
+            targetDeck.repeatMode != Player.REPEAT_MODE_ONE
+        return manualBlendOn
+    }
+
+    private fun buildForwardingPlayer(deckPlayer: ExoPlayer): Player {
+        return object : androidx.media3.common.ForwardingPlayer(deckPlayer) {
             override fun getAvailableCommands(): Player.Commands {
                 return super.getAvailableCommands().buildUpon()
                     .add(Player.COMMAND_SEEK_TO_NEXT)
@@ -122,9 +250,119 @@ class MusicService : MediaSessionService() {
                 }
             }
 
+            override fun setMediaItems(mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long) {
+                if (this@MusicService.player !== deckPlayer) {
+                    this@MusicService.player.setMediaItems(mediaItems, startIndex, startPositionMs)
+                    return
+                }
+                if (shouldCrossfadeIncomingSetMediaItems(deckPlayer)) {
+                    audioFeatureManagers.interceptIncomingMediaItemsForCrossfade(
+                        scope = serviceScope,
+                        host = crossfadeHost,
+                        outgoingPlayer = deckPlayer,
+                        mediaItems = mediaItems,
+                        startIndex = startIndex,
+                        startPositionMs = startPositionMs
+                    )
+                    return
+                }
+                if (audioFeatureManagers.isCrossfading) {
+                    audioFeatureManagers.abortActiveCrossfade(serviceScope)
+                }
+                super.setMediaItems(mediaItems, startIndex, startPositionMs)
+            }
+
+            override fun setMediaItems(mediaItems: MutableList<MediaItem>, resetPosition: Boolean) {
+                if (this@MusicService.player !== deckPlayer) {
+                    this@MusicService.player.setMediaItems(mediaItems, resetPosition)
+                    return
+                }
+                if (shouldCrossfadeIncomingSetMediaItems(deckPlayer)) {
+                    audioFeatureManagers.interceptIncomingMediaItemsForCrossfade(
+                        scope = serviceScope,
+                        host = crossfadeHost,
+                        outgoingPlayer = deckPlayer,
+                        mediaItems = mediaItems,
+                        startIndex = 0,
+                        startPositionMs = 0L
+                    )
+                    return
+                }
+                if (audioFeatureManagers.isCrossfading) {
+                    audioFeatureManagers.abortActiveCrossfade(serviceScope)
+                }
+                super.setMediaItems(mediaItems, resetPosition)
+            }
+
+            override fun setMediaItem(mediaItem: MediaItem, startPositionMs: Long) {
+                if (this@MusicService.player !== deckPlayer) {
+                    this@MusicService.player.setMediaItem(mediaItem, startPositionMs)
+                    return
+                }
+                if (shouldCrossfadeIncomingSetMediaItems(deckPlayer)) {
+                    audioFeatureManagers.interceptIncomingMediaItemsForCrossfade(
+                        scope = serviceScope,
+                        host = crossfadeHost,
+                        outgoingPlayer = deckPlayer,
+                        mediaItems = listOf(mediaItem),
+                        startIndex = 0,
+                        startPositionMs = startPositionMs
+                    )
+                    return
+                }
+                if (audioFeatureManagers.isCrossfading) {
+                    audioFeatureManagers.abortActiveCrossfade(serviceScope)
+                }
+                super.setMediaItem(mediaItem, startPositionMs)
+            }
+
+            override fun prepare() {
+                if (android.os.SystemClock.elapsedRealtime() - audioFeatureManagers.lastInterceptedSetMediaItemsMs < 1_500L &&
+                    audioFeatureManagers.isCrossfading
+                ) {
+                    return
+                }
+                if (this@MusicService.player !== deckPlayer) {
+                    this@MusicService.player.prepare()
+                    return
+                }
+                super.prepare()
+            }
+
+            override fun play() {
+                if (android.os.SystemClock.elapsedRealtime() - audioFeatureManagers.lastInterceptedSetMediaItemsMs < 1_500L &&
+                    audioFeatureManagers.isCrossfading
+                ) {
+                    return
+                }
+                if (this@MusicService.player !== deckPlayer) {
+                    this@MusicService.player.play()
+                    return
+                }
+                super.play()
+            }
+
+            override fun pause() {
+                if (this@MusicService.player !== deckPlayer) {
+                    this@MusicService.player.pause()
+                    return
+                }
+                super.pause()
+            }
+
             override fun seekToNext() {
-                if (player.mediaItemCount > 1 && player.hasNextMediaItem()) {
-                    super.seekToNext()
+                val active = this@MusicService.player
+                if (active.mediaItemCount > 1 && active.hasNextMediaItem()) {
+                    if (audioFeatureManagers.tryManualMultiItemSkipCrossfade(
+                            scope = serviceScope,
+                            host = crossfadeHost,
+                            outgoingPlayer = active,
+                            targetIndex = active.nextMediaItemIndex
+                        )
+                    ) {
+                        return
+                    }
+                    active.seekToNext()
                 } else {
                     playbackEventBus.emit(PlaybackEvent.SkipToNextRequested)
                 }
@@ -135,8 +373,20 @@ class MusicService : MediaSessionService() {
             }
 
             override fun seekToPrevious() {
-                if (player.mediaItemCount > 1 && player.hasPreviousMediaItem()) {
-                    super.seekToPrevious()
+                val active = this@MusicService.player
+                if (active.currentPosition <= 3_000L && active.mediaItemCount > 1 && active.hasPreviousMediaItem()) {
+                    if (audioFeatureManagers.tryManualMultiItemSkipCrossfade(
+                            scope = serviceScope,
+                            host = crossfadeHost,
+                            outgoingPlayer = active,
+                            targetIndex = active.previousMediaItemIndex
+                        )
+                    ) {
+                        return
+                    }
+                    active.seekToPrevious()
+                } else if (active.mediaItemCount > 1 && active.hasPreviousMediaItem()) {
+                    active.seekToPrevious()
                 } else {
                     playbackEventBus.emit(PlaybackEvent.SkipToPreviousRequested)
                 }
@@ -145,6 +395,27 @@ class MusicService : MediaSessionService() {
             override fun seekToPreviousMediaItem() {
                 seekToPrevious()
             }
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "MyPlayer:MusicServiceWakeLock"
+        ).apply { setReferenceCounted(false) }
+
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val wifiLockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION")
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        wifiLock = wifiManager.createWifiLock(wifiLockMode, "MyPlayer:MusicServiceWifiLock").apply {
+            setReferenceCounted(false)
         }
 
         val callback = object : MediaSession.Callback {
@@ -177,7 +448,7 @@ class MusicService : MediaSessionService() {
             }
         }
 
-        mediaSession = MediaSession.Builder(this, forwardingPlayer)
+        mediaSession = MediaSession.Builder(this, buildForwardingPlayer(player))
             .setCallback(callback)
             .build()
 
@@ -190,86 +461,19 @@ class MusicService : MediaSessionService() {
             }
         )
 
-        player.addListener(object : Player.Listener {
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                super.onMediaItemTransition(mediaItem, reason)
-                playbackStateManager.currentOnlineSong.value?.let { online ->
-                    val tier = currentAudioPlaybackState.streamingQuality
-                    val preferLossless = tier != com.myplayer.app.data.preferences.AudioQualityTier.YOUTUBE_MUSIC &&
-                        tier != com.myplayer.app.data.preferences.AudioQualityTier.DATA_SAVER
-                    upgradeHandoffManager.scheduleMidStreamUpgrade(
-                        scope = serviceScope,
-                        player = player,
-                        videoId = online.videoId,
-                        title = online.title,
-                        artist = online.artist,
-                        durationMs = online.durationMs,
-                        preferLossless = preferLossless
-                    )
-                }
-            }
+        player.addListener(servicePlayerListener)
 
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                super.onIsPlayingChanged(isPlaying)
-                updateServiceLocks(isPlaying || player.playWhenReady)
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                super.onPlaybackStateChanged(playbackState)
-                val active = player.playWhenReady &&
-                    (playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_READY)
-                if (active) {
-                    acquireLocks()
-                }
-            }
-
-            override fun onRepeatModeChanged(repeatMode: Int) {
-                super.onRepeatModeChanged(repeatMode)
-                // Guard against 1-item online queue setting ExoPlayer to REPEAT_MODE_OFF while user selected REPEAT_MODE_ALL
-                if (repeatMode == Player.REPEAT_MODE_OFF && playbackStateManager.repeatMode.value == Player.REPEAT_MODE_ALL) {
-                    return
-                }
-                getSharedPreferences("playback_preferences", Context.MODE_PRIVATE)
-                    .edit().putInt("playback_repeat_mode", repeatMode).apply()
-            }
-
-            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                super.onShuffleModeEnabledChanged(shuffleModeEnabled)
-                getSharedPreferences("playback_preferences", Context.MODE_PRIVATE)
-                    .edit().putBoolean("playback_shuffle_mode", shuffleModeEnabled).apply()
-            }
-
-            override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                super.onAudioSessionIdChanged(audioSessionId)
-                // Do not attach global system audio effects when Multi-Output Split routing is active
-                val allowSystemFx = currentAudioPlaybackState.systemAudioEffects &&
-                    !audioOutputRouterManager.isSplitRoutingActive
-                audioFeatureManagers.toggleSystemAudioEffects(audioSessionId, allowSystemFx)
-                serviceScope.launch {
-                    val config = audioSettingsRepository.configFlow.firstOrNull()
-                    if (config != null) {
-                        updateLoudnessEnhancer(
-                            enabled = config.loudnessNormalize && !audioOutputRouterManager.isSplitRoutingActive,
-                            gainMb = config.loudnessGainMb
-                        )
-                    }
-                }
-            }
-        })
-
-        // MyPlayer Audio FX Speed & Pitch live bridge hook (dispatched safely on Main thread)
-
-        // Master Audio & Playback Feature Integration:
-        // 1. Crossfade engine monitor (synced live with Audio FX Lab & AudioPlaybackStore)
+        // 1. MyPlayer Smooth Crossfade Engine (synced live with Audio FX Lab & AudioPlaybackStore)
         com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.attachMasterDsp(masterAudioDspProcessor)
+        com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.loadFineTune(this)
         com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.onUpdateCrossfadeConfig = { enabled, seconds ->
             serviceScope.launch {
                 runCatching { audioPlaybackStore.setCrossfade(enabled, seconds) }
             }
         }
-        audioFeatureManagers.attachCrossfadeMonitor(
+        audioFeatureManagers.attachMyPlayerCrossfadeEngine(
             scope = serviceScope,
-            exoPlayer = player,
+            host = crossfadeHost,
             isEnabled = {
                 currentAudioPlaybackState.crossfadeEnabled ||
                     com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.isAnyCrossfadeActive
@@ -280,14 +484,6 @@ class MusicService : MediaSessionService() {
                     com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.crossfadeSeconds
                 } else {
                     currentAudioPlaybackState.crossfadeSeconds.toFloat()
-                }
-            },
-            dataSourceFactory = cacheDataSourceFactory,
-            onTriggerNextTrack = {
-                if (player.mediaItemCount > 1 && player.hasNextMediaItem()) {
-                    player.seekToNextMediaItem()
-                } else {
-                    playbackEventBus.emit(PlaybackEvent.SkipToNextRequested)
                 }
             }
         )
@@ -309,7 +505,6 @@ class MusicService : MediaSessionService() {
                         surround = state.dolbySurroundAtmos
                     )
                 )
-                // Keep unified AudioFxService spatial processor synced when changed from AudioAndPlaybackScreen
                 if (state.spatialAudioEnabled || state.dolbySurroundAtmos) {
                     com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.spatialEnabled = state.spatialAudioEnabled
                     com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.spatialIsSpeakersMode =
@@ -325,7 +520,9 @@ class MusicService : MediaSessionService() {
         com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.onUpdatePlaybackSpeedPitch = { speed, pitch ->
             serviceScope.launch(Dispatchers.Main.immediate) {
                 try {
-                    player.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
+                    val params = androidx.media3.common.PlaybackParameters(speed, pitch)
+                    player.playbackParameters = params
+                    audioFeatureManagers.fadingOutgoingPlayer?.playbackParameters = params
                 } catch (e: Exception) {
                     android.util.Log.w("MusicService", "Failed to set playbackParameters", e)
                 }
@@ -359,8 +556,16 @@ class MusicService : MediaSessionService() {
         val sessionId = player.audioSessionId
         if (sessionId != C.AUDIO_SESSION_ID_UNSET && sessionId != 0) {
             try {
-                if (loudnessEnhancer == null || loudnessSessionId != sessionId) {
-                    try { loudnessEnhancer?.release() } catch (_: Exception) {}
+                if (loudnessEnhancer != null && loudnessSessionId != sessionId) {
+                    // Preserve outgoing player's LoudnessEnhancer during crossfade until it is released!
+                    if (fadingLoudnessEnhancer == null) {
+                        fadingLoudnessEnhancer = loudnessEnhancer
+                    } else {
+                        runCatching { loudnessEnhancer?.release() }
+                    }
+                    loudnessEnhancer = null
+                }
+                if (loudnessEnhancer == null) {
                     loudnessEnhancer = android.media.audiofx.LoudnessEnhancer(sessionId)
                     loudnessSessionId = sessionId
                 }
@@ -374,7 +579,6 @@ class MusicService : MediaSessionService() {
 
     private fun acquireLocks() {
         if (wakeLock?.isHeld == false) {
-            // 4-hour safety timeout so locks never leak indefinitely
             wakeLock?.acquire(4 * 60 * 60 * 1000L)
         }
         if (wifiLock?.isHeld == false) {
@@ -419,7 +623,6 @@ class MusicService : MediaSessionService() {
         try {
             super.onUpdateNotification(session, keepForeground)
         } catch (_: Exception) {
-            // Suppress ForegroundServiceStartNotAllowedException on Android 12+ background transitions
         }
     }
 
@@ -428,6 +631,8 @@ class MusicService : MediaSessionService() {
         com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.onUpdateCrossfadeConfig = null
         releaseLocks()
         try {
+            fadingLoudnessEnhancer?.release()
+            fadingLoudnessEnhancer = null
             loudnessEnhancer?.release()
             loudnessEnhancer = null
         } catch (_: Exception) {}
@@ -445,7 +650,6 @@ class MusicService : MediaSessionService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        // If the user swipes away the app from recent apps, we should stop the service if it's paused.
         if (!player.playWhenReady || player.playbackState == Player.STATE_ENDED) {
             releaseLocks()
             stopSelf()

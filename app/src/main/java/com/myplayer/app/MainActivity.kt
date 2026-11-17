@@ -3,7 +3,6 @@ package com.myplayer.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -11,37 +10,25 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.myplayer.app.data.local.datastore.SettingsDataStore
+import com.myplayer.app.data.update.InAppUpdateManager
 import com.myplayer.app.data.update.UpdateChecker
 import com.myplayer.app.data.update.UpdateInfo
 import com.myplayer.app.data.update.UpdateNotifier
-import com.myplayer.app.ui.components.WhatsNewDialog
-import com.myplayer.app.ui.components.WhatsNewRepository
 import com.myplayer.app.tv.TvMainScreen
 import com.myplayer.app.tv.isTelevisionDevice
+import com.myplayer.app.ui.components.MyPlayerInAppUpdateSheet
+import com.myplayer.app.ui.components.WhatsNewDialog
+import com.myplayer.app.ui.components.WhatsNewRepository
 import com.myplayer.app.ui.screens.main.MainScreen
 import com.myplayer.app.ui.theme.MyPlayerTheme
 import com.myplayer.app.ui.theme.ThemeState
@@ -54,6 +41,7 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var updateChecker: UpdateChecker
     @Inject lateinit var updateNotifier: UpdateNotifier
+    @Inject lateinit var inAppUpdateManager: InAppUpdateManager
     @Inject lateinit var settingsDataStore: SettingsDataStore
 
     private var launchUpdateAvailable by mutableStateOf<UpdateInfo?>(null)
@@ -62,7 +50,7 @@ class MainActivity : ComponentActivity() {
     private val requestNotificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
             if (isGranted) {
-                checkForUpdatesOnLaunch()
+                checkForUpdatesOnLaunch(forceShowEvenIfSnoozed = false)
             }
         }
 
@@ -76,10 +64,11 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
 
+        val openedFromUpdateNotif = intent?.action == UpdateNotifier.ACTION_OPEN_IN_APP_UPDATE
         handleNotificationIntent(intent)
 
         requestNotificationPermissionIfNeeded()
-        checkForUpdatesOnLaunch()
+        checkForUpdatesOnLaunch(forceShowEvenIfSnoozed = openedFromUpdateNotif)
 
         // Fresh users get What's New right after onboarding (MainScreen shows it),
         // so skip the launch-time dialog until onboarding is done.
@@ -93,6 +82,9 @@ class MainActivity : ComponentActivity() {
             val scope = rememberCoroutineScope()
             val dataStoreDark by settingsDataStore.isDarkMode.collectAsStateWithLifecycle(
                 initialValue = initialDark
+            )
+            val savedUserName by settingsDataStore.userName.collectAsStateWithLifecycle(
+                initialValue = ""
             )
 
             // 2. When DataStore emits a value, keep ThemeState & SharedPreferences synced
@@ -123,61 +115,16 @@ class MainActivity : ComponentActivity() {
                 }
 
                 launchUpdateAvailable?.let { update ->
-                    AlertDialog(
-                        onDismissRequest = { launchUpdateAvailable = null },
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                        textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        title = { Text("Update Available", fontWeight = FontWeight.Bold) },
-                        text = {
-                            Column {
-                                Text(
-                                    "A newer version (${update.versionName}) of MyPlayer is available!",
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    "Visit our official website to download the latest release APK.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                if (update.releaseNotes.isNotBlank()) {
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        update.releaseNotes.take(250),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
+                    MyPlayerInAppUpdateSheet(
+                        updateInfo = update,
+                        inAppUpdateManager = inAppUpdateManager,
+                        userName = savedUserName,
+                        onSnooze24h = {
+                            updateChecker.snoozeUpdateFor24Hours(update.versionName)
+                            launchUpdateAvailable = null
                         },
-                        confirmButton = {
-                            Button(
-                                onClick = {
-                                    val targetUrl = update.releaseUrl.ifBlank { UpdateChecker.UPDATE_WEBSITE_URL }
-                                    launchUpdateAvailable = null
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    startActivity(intent)
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("Update Now", fontWeight = FontWeight.Bold)
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(
-                                onClick = { launchUpdateAvailable = null },
-                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                            ) {
-                                Text("Later")
-                            }
+                        onDismiss = {
+                            launchUpdateAvailable = null
                         }
                     )
                 }
@@ -206,12 +153,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun checkForUpdatesOnLaunch() {
+    private fun checkForUpdatesOnLaunch(forceShowEvenIfSnoozed: Boolean = false) {
         lifecycleScope.launch {
             try {
                 val update = updateChecker.checkForUpdate()
                 if (update != null) {
-                    launchUpdateAvailable = update
+                    if (forceShowEvenIfSnoozed || !updateChecker.isUpdateSnoozed(update.versionName)) {
+                        launchUpdateAvailable = update
+                    }
                     if (updateChecker.shouldNotifyFor(update)) {
                         updateNotifier.show(update)
                         updateChecker.markNotified(update)
@@ -226,6 +175,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.action == UpdateNotifier.ACTION_OPEN_IN_APP_UPDATE) {
+            checkForUpdatesOnLaunch(forceShowEvenIfSnoozed = true)
+        }
         handleNotificationIntent(intent)
     }
 

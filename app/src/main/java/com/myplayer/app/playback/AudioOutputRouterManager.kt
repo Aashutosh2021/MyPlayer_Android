@@ -172,6 +172,7 @@ class AudioOutputRouterManager @Inject constructor(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var attachedPlayer: ExoPlayer? = null
+    private val auxiliaryPlayers = java.util.concurrent.CopyOnWriteArrayList<ExoPlayer>()
     private var baseAudioAttributes: AudioAttributes = AudioAttributes.Builder()
         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
         .setUsage(C.USAGE_MEDIA)
@@ -301,17 +302,51 @@ class AudioOutputRouterManager @Inject constructor(
     }
 
     fun attachExoPlayer(player: ExoPlayer, attributes: AudioAttributes) {
-        if (!com.myplayer.app.BuildConfig.DEBUG) return
         this.attachedPlayer?.removeListener(playerPlaybackListener)
         this.attachedPlayer = player
         this.baseAudioAttributes = attributes
         this.lastAppliedPlayer = null
         this.lastAppliedIgnoreFocus = null
         this.lastAppliedDeviceId = NO_DEVICE_ID
+        if (!com.myplayer.app.BuildConfig.DEBUG) return
         player.addListener(playerPlaybackListener)
         mainHandler.post {
             refreshConnectedDevicesAndApplyRouting(forceReapply = true)
             scheduleRouteGuardianIfNeeded()
+        }
+    }
+
+    /**
+     * Immediately pins a newly created crossfade/auxiliary [ExoPlayer] deck to the same preferred
+     * hardware output device as the main player so crossfade transitions never fall back to the
+     * wrong speaker/Bluetooth sink (ported from MyPlayer's `applyOutputRoute`).
+     */
+    fun applyCurrentRouteToAuxiliaryPlayer(auxPlayer: ExoPlayer) {
+        if (!com.myplayer.app.BuildConfig.DEBUG) return
+        if (!auxiliaryPlayers.contains(auxPlayer)) {
+            auxiliaryPlayers.add(auxPlayer)
+        }
+        val rawSinks = getRawOutputSinks()
+        val current = _state.value
+        val resolvedRawInfo: AudioDeviceInfo? = resolveTargetAudioDeviceInfo(
+            rawSinks = rawSinks,
+            scenario = current.activeScenario,
+            pinnedId = current.pinnedDeviceId,
+            pinnedCategory = current.pinnedCategory
+        )
+        mainHandler.post {
+            runCatching {
+                auxPlayer.setHandleAudioBecomingNoisy(!current.ignoreAudioFocus)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    auxPlayer.setPreferredAudioDevice(resolvedRawInfo)
+                }
+            }
+        }
+    }
+
+    fun detachAuxiliaryPlayer(auxPlayer: ExoPlayer?) {
+        if (auxPlayer != null) {
+            auxiliaryPlayers.remove(auxPlayer)
         }
     }
 
@@ -519,6 +554,9 @@ class AudioOutputRouterManager @Inject constructor(
                     runCatching {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             player.setPreferredAudioDevice(resolvedRawInfo)
+                            for (aux in auxiliaryPlayers) {
+                                runCatching { aux.setPreferredAudioDevice(resolvedRawInfo) }
+                            }
                             lastAppliedDeviceId = targetDeviceId
                             Log.d(TAG, "Pinned ExoPlayer to deviceId=$targetDeviceId (${resolvedRawInfo?.productName})")
                         }

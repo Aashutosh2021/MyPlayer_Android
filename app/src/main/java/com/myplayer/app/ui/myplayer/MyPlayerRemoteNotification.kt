@@ -58,14 +58,12 @@ data class MyPlayerRemoteNotification(
     val createdAtMs: Long
 )
 
-typealias MochyRemoteNotification = MyPlayerRemoteNotification
-
 object MyPlayerRemoteNotificationManager {
     private const val FIRESTORE_PROJECT_ID = "myplayer-660ee"
     private const val FIRESTORE_NOTIFS_URL =
         "https://firestore.googleapis.com/v1/projects/$FIRESTORE_PROJECT_ID/databases/(default)/documents/notifications?pageSize=20"
     private const val CHANNEL_ID = "myplayer_remote_alerts"
-    private const val PREFS_NAME = "mochy_remote_notifs_prefs"
+    private const val PREFS_NAME = "myplayer_remote_notifs_prefs"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var pollingStarted = false
@@ -284,8 +282,6 @@ object MyPlayerRemoteNotificationManager {
     }
 }
 
-typealias MochyRemoteNotificationManager = MyPlayerRemoteNotificationManager
-
 @Composable
 fun MyPlayerRemoteNotificationPopupDialog(
     notification: MyPlayerRemoteNotification,
@@ -411,12 +407,6 @@ fun MyPlayerRemoteNotificationPopupDialog(
     }
 }
 
-@Composable
-fun MochyRemoteNotificationPopupDialog(
-    notification: MochyRemoteNotification,
-    onDismiss: () -> Unit,
-    onNavigateToSettings: () -> Unit = {}
-) = MyPlayerRemoteNotificationPopupDialog(notification, onDismiss, onNavigateToSettings)
 
 @Composable
 fun MyPlayerRemoteNotificationsCenterScreen(
@@ -617,9 +607,4 @@ fun MyPlayerRemoteNotificationsCenterScreen(
     }
 }
 
-@Composable
-fun MochyRemoteNotificationsCenterScreen(
-    mochyState: MyPlayerUiStateHolder,
-    onBack: () -> Unit
-) = MyPlayerRemoteNotificationsCenterScreen(mochyState, onBack)
 
