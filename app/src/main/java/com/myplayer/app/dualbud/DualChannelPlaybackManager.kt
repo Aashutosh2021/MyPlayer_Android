@@ -304,7 +304,7 @@ class DualChannelPlaybackManager @Inject constructor(
                     it.copy(
                         isPlaying = false,
                         isLoading = false,
-                        errorMessage = error.localizedMessage ?: "Playback error"
+                        errorMessage = com.myplayer.app.playback.userErrorMessage("Couldn't play track on this channel.", error)
                     )
                 }
                 // If both channels have failed or are stopped, safely handle

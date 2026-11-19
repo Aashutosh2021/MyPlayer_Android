@@ -172,7 +172,7 @@ class LibraryViewModel @Inject constructor(
                 repository.addFolder(uri, name)
                 _importStatusMessage.value = "Added local folder '$name' & scanned audio files!"
             } catch (e: Exception) {
-                _importStatusMessage.value = "Failed to scan folder: ${e.message}"
+                _importStatusMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to scan selected folder.", e)
             } finally {
                 _isScanningLocal.value = false
             }
@@ -186,7 +186,7 @@ class LibraryViewModel @Inject constructor(
                 repository.rescanAllFolders()
                 _importStatusMessage.value = "Scanned local storage for audio files!"
             } catch (e: Exception) {
-                _importStatusMessage.value = "Local scan error: ${e.message}"
+                _importStatusMessage.value = com.myplayer.app.playback.userErrorMessage("Couldn't scan local audio files.", e)
             } finally {
                 _isScanningLocal.value = false
             }
@@ -218,10 +218,10 @@ class LibraryViewModel @Inject constructor(
                 res.onSuccess { savedLoc ->
                     _importStatusMessage.value = "Saved $extLabel file to: $savedLoc"
                 }.onFailure { err ->
-                    _importStatusMessage.value = "Failed to save $extLabel file: ${err.message}"
+                    _importStatusMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", err)
                 }
             } catch (e: Exception) {
-                _importStatusMessage.value = "Failed to save $extLabel file: ${e.message}"
+                _importStatusMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", e)
             }
         }
     }
@@ -236,7 +236,7 @@ class LibraryViewModel @Inject constructor(
                 _importStatusMessage.value = msg
                 onResult(true, msg)
             }.onFailure { err ->
-                val msg = "Failed to import Spotify playlist: ${err.message ?: "Could not load playlist"}"
+                val msg = com.myplayer.app.playback.userErrorMessage("Failed to import Spotify playlist.", err)
                 _importStatusMessage.value = msg
                 onResult(false, msg)
             }
@@ -253,7 +253,7 @@ class LibraryViewModel @Inject constructor(
                 _importStatusMessage.value = msg
                 onResult(true, msg)
             }.onFailure { err ->
-                val msg = "Failed to import YouTube playlist: ${err.message ?: "Could not load playlist"}"
+                val msg = com.myplayer.app.playback.userErrorMessage("Failed to import YouTube playlist.", err)
                 _importStatusMessage.value = msg
                 onResult(false, msg)
             }

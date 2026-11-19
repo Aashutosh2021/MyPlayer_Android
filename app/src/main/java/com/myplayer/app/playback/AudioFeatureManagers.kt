@@ -74,7 +74,7 @@ class AudioFeatureManagers @Inject constructor(
         private set
 
     val shouldKeepOutgoingPlayingOnResolve: Boolean
-        get() = awaitingOnlineCrossfadeNext || isCrossfading || MyPlayerAudioFxDspBridge.manualCrossfadeEnabled
+        get() = awaitingOnlineCrossfadeNext || isCrossfading
 
     private var pendingIncomingPlayer: ExoPlayer? = null
 
@@ -340,24 +340,9 @@ class AudioFeatureManagers @Inject constructor(
         outgoingPlayer: ExoPlayer,
         targetIndex: Int
     ): Boolean {
-        if (!MyPlayerAudioFxDspBridge.manualCrossfadeEnabled || isCrossfading) return false
-        if (!outgoingPlayer.isPlaying && !outgoingPlayer.playWhenReady) return false
-        if (outgoingPlayer.currentPosition <= 1_000L || outgoingPlayer.repeatMode == Player.REPEAT_MODE_ONE) return false
-        if (targetIndex !in 0 until outgoingPlayer.mediaItemCount) return false
-
-        val fadeDurationMs = (
-            (if (MyPlayerAudioFxDspBridge.crossfadeEnabled) MyPlayerAudioFxDspBridge.crossfadeSeconds else 3.5f)
-                .coerceIn(1.5f, 8f) * 1000f
-            ).toLong()
-        handledOutgoingKey = "$transitionEpoch:${outgoingPlayer.currentMediaItem?.mediaId.orEmpty()}"
-        startMultiItemDeckCrossfade(
-            scope = scope,
-            host = host,
-            outgoingPlayer = outgoingPlayer,
-            targetNextIndex = targetIndex,
-            fadeDurationMs = fadeDurationMs
-        )
-        return true
+        // Manual song changes/skips always switch directly without crossfade;
+        // crossfade is reserved strictly for automatic end-of-track transitions.
+        return false
     }
 
     /**

@@ -109,10 +109,14 @@ fun SpotifyLoginDialog(
                 }
                 .onFailure { err ->
                     statusText = null
-                    loginError = err.message ?: "Unknown login error"
+                    val userMsg = com.myplayer.app.playback.userErrorMessage(
+                        "Couldn't sign in to Spotify. Please check your account and try again.",
+                        err
+                    )
+                    loginError = userMsg
                     Toast.makeText(
                         context,
-                        "Login error: ${err.message ?: "Unknown"}",
+                        userMsg,
                         Toast.LENGTH_SHORT
                     ).show()
                     tokenFetchStarted.set(false)

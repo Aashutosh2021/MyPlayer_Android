@@ -45,8 +45,13 @@
 #include <dlfcn.h>
 
 #define TAG "MyPlayerNative"
+#ifdef NDEBUG
+#define LOGD(...) ((void)0)
+#define LOGW(...) ((void)0)
+#else
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  TAG, __VA_ARGS__)
+#endif
 
 // ─── Obfuscated string helpers ────────────────────────────────────────────────
 // Strings are stored XOR-encoded so they don't appear in plain text in

@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Platform](https://img.shields.io/badge/Platform-Android%20(API%2028--36)-3DDC84?style=for-the-badge&logo=android&logoColor=white)
-![Version](https://img.shields.io/badge/Version-v6.8%20Stable-D2F83A?style=for-the-badge&labelColor=1A2216&logoColor=black)
+![Version](https://img.shields.io/badge/Version-v6.9%20Stable-D2F83A?style=for-the-badge&labelColor=1A2216&logoColor=black)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
 ![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
 ![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2B%20MVVM%20%2B%20UDF-FF6F00?style=for-the-badge)
@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/Aashutosh2021/MyPlayer_Android/releases/latest">
-    <img src="https://img.shields.io/badge/Download-Latest%20APK%20(v6.8)-D2F83A?style=for-the-badge&labelColor=12160E&logo=android&logoColor=white" alt="Download Latest Release" />
+    <img src="https://img.shields.io/badge/Download-Latest%20APK%20(v6.9)-D2F83A?style=for-the-badge&labelColor=12160E&logo=android&logoColor=white" alt="Download Latest Release" />
   </a>
   <a href="https://github.com/Aashutosh2021/Myplayer_Windows">
     <img src="https://img.shields.io/badge/Windows%20Desktop-MyPlayer%20v6.6-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="MyPlayer for Windows" />
@@ -30,7 +30,14 @@
 
 ---
 
-## 🌟 What's New in v6.8
+## 🌟 What's New in v6.9
+
+- **🎨 Explore Moods & Genres Library + 50% User Taste Mix**: Added OpenTune-style Mood & Genre detail carousels and full playlist subscreens, fetched dedicated mood/genre cover art (fixing duplicate trending song posters on Explore tiles), and blended personalized User Taste + Bollywood/Indian shelves 50/50 with global YouTube Music playlists.
+- **🔀 Automatic-Only Crossfade & Skip Stability Fixes**: Restricted dual-deck crossfade strictly to automatic end-of-track transitions so manual Next/Previous skips and song taps switch immediately without overlap; fixed duplicate `SkipToNextRequested` triggers, ignored premature `STATE_ENDED` during crossfade, and scoped single-item repeat interception.
+- **🖼️ Offline Artwork & Synced `.LRC` Lyrics Fixes**: Saved local `filesDir/artwork/<id>.jpg` posters and `filesDir/lyrics/<id>.lrc` + companion `.lrc` files for both downloads and MP3/M4A exports, added SAF custom-folder & Unicode `.lrc` lookup, backfilled missing artwork/lyrics for existing downloads, and fixed offline poster resolution across queue playback.
+- **🛡️ Clean Release Error Messages & Smaller APK**: Stripped native C++ developer logs and internal exception details from release UI errors, and removed unused code/assets/dependencies plus `x86_64` ABI bloat to slim the release APK down to ~18.2 MB.
+
+### Previous v6.8 Highlights (Retained)
 
 - **🔀 Dual-Deck Full-DSP Crossfade & Blend Manual Skips**: Overlapping dual-deck transitions promote the incoming track only once buffered (`STATE_READY`), run isolated 64-bit EQ/Clarity/Spatial/Reverb DSP per deck, keep combined equal-power loudness constant (eliminating end/start silence dips), and add 5 Crossmix styles (`SilkBlend`, `BassSwap`, `FilterSweep`, `Dampen`, `EqualPower`) in Audio Lab.
 - **⬇️ In-App APK Updater & Beta Channel**: Downloads and installs MyPlayer updates directly inside the app with ABI-matched release selection, progress notifications, 24-hour snooze, and optional Beta/Nightly toggle in Settings -> About.

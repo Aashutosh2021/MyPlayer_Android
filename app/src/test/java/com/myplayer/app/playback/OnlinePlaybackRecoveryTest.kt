@@ -112,6 +112,19 @@ class OnlinePlaybackRecoveryTest {
         assertEquals("Local or downloaded file not found.", message)
     }
 
+    @Test
+    fun userErrorMessage_hidesDeveloperDetailInReleaseAndKeepsInDebug() {
+        val rawException = IllegalStateException("JNI native error 0xDEADBEEF")
+        assertEquals(
+            "Download failed. Please try again.",
+            userErrorMessage("Download failed. Please try again.", rawException, includeDebugDetail = false)
+        )
+        assertEquals(
+            "Download failed. Please try again. (JNI native error 0xDEADBEEF)",
+            userErrorMessage("Download failed. Please try again.", rawException, includeDebugDetail = true)
+        )
+    }
+
     // =========================================================================
     // 2. Track Type & Origin Detection
     // =========================================================================

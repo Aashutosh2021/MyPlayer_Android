@@ -228,10 +228,10 @@ class OnlineSearchViewModel @Inject constructor(
                     _errorMessage.value = "Could not resolve stream URL for '${song.title}'"
                 }
             } catch (e: com.myplayer.app.data.online.YouTubeStreamBlockedException) {
-                _errorMessage.value = e.message
+                _errorMessage.value = com.myplayer.app.playback.userErrorMessage("This track isn't available right now.", e)
             } catch (e: Exception) {
                 Log.e("OnlineSearchViewModel", "Stream failed", e)
-                _errorMessage.value = "Streaming failed: ${e.message}"
+                _errorMessage.value = com.myplayer.app.playback.userErrorMessage("Couldn't play this song. Please try again.", e)
             } finally {
                 _isLoadingStream.value = null
             }
@@ -291,10 +291,10 @@ class OnlineSearchViewModel @Inject constructor(
                 }
             } catch (e: com.myplayer.app.data.online.YouTubeStreamBlockedException) {
                 Log.e("DOWNLOAD_DEBUG", "YouTube blocked: ${e.message}")
-                _errorMessage.value = e.message
+                _errorMessage.value = com.myplayer.app.playback.userErrorMessage("This track can't be downloaded right now.", e)
             } catch (e: Exception) {
                 Log.e("DOWNLOAD_DEBUG", "Download resolution FAILED", e)
-                _errorMessage.value = "Download failed: ${e.message}"
+                _errorMessage.value = com.myplayer.app.playback.userErrorMessage("Download failed. Please try again.", e)
             } finally {
                 _isLoadingStream.value = null
             }
@@ -327,10 +327,10 @@ class OnlineSearchViewModel @Inject constructor(
                 res.onSuccess { savedLoc ->
                     _errorMessage.value = "Saved $extLabel to: $savedLoc"
                 }.onFailure { err ->
-                    _errorMessage.value = "Failed to save $extLabel: ${err.message}"
+                    _errorMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", err)
                 }
             } catch (e: Exception) {
-                _errorMessage.value = "Failed to save $extLabel: ${e.message}"
+                _errorMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", e)
             } finally {
                 _isLoadingStream.value = null
             }

@@ -83,18 +83,40 @@ class DownloadWorker @AssistedInject constructor(
         remoteThumbnailUrl: String,
         audioSavedPath: String
     ): String = withContext(Dispatchers.IO) {
+        val artDir = File(context.filesDir, "artwork").apply { mkdirs() }
+        val localArtFile = File(artDir, "$videoId.jpg")
+
+        // If remoteThumbnailUrl is already a valid local file, ensure it's copied to filesDir/artwork/<videoId>.jpg
+        if (remoteThumbnailUrl.startsWith("file://") || remoteThumbnailUrl.startsWith("/")) {
+            val srcPath = if (remoteThumbnailUrl.startsWith("file://")) {
+                Uri.parse(remoteThumbnailUrl).path
+            } else remoteThumbnailUrl
+            val srcFile = srcPath?.let { File(it) }
+            if (srcFile != null && srcFile.exists() && srcFile.length() > 512L) {
+                if (srcFile.absolutePath != localArtFile.absolutePath) {
+                    runCatching { srcFile.copyTo(localArtFile, overwrite = true) }
+                }
+                if (!audioSavedPath.startsWith("content://") && audioSavedPath.isNotBlank()) {
+                    val audioFile = File(audioSavedPath)
+                    audioFile.parentFile?.let { parent ->
+                        runCatching { srcFile.copyTo(File(parent, "${audioFile.nameWithoutExtension}.jpg"), overwrite = true) }
+                    }
+                }
+                return@withContext Uri.fromFile(localArtFile).toString()
+            }
+        }
+
         val candidateUrls = buildList {
-            if (remoteThumbnailUrl.isNotBlank()) {
+            if (remoteThumbnailUrl.isNotBlank() && (remoteThumbnailUrl.startsWith("http://") || remoteThumbnailUrl.startsWith("https://"))) {
                 add(remoteThumbnailUrl)
             }
             if (videoId.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
                 add("https://i.ytimg.com/vi/$videoId/hq720.jpg")
+                add("https://i.ytimg.com/vi/$videoId/sddefault.jpg")
                 add("https://i.ytimg.com/vi/$videoId/hqdefault.jpg")
+                add("https://img.youtube.com/vi/$videoId/hqdefault.jpg")
             }
         }.distinct()
-
-        val artDir = File(context.filesDir, "artwork").apply { mkdirs() }
-        val localArtFile = File(artDir, "$videoId.jpg")
 
         for (url in candidateUrls) {
             if (!url.startsWith("http://") && !url.startsWith("https://")) continue
@@ -130,6 +152,61 @@ class DownloadWorker @AssistedInject constructor(
             return@withContext Uri.fromFile(localArtFile).toString()
         }
         return@withContext remoteThumbnailUrl
+    }
+
+    private fun extractDurationMs(savedPath: String): Long {
+        if (savedPath.isBlank()) return 0L
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            if (savedPath.startsWith("content://")) {
+                retriever.setDataSource(context, Uri.parse(savedPath))
+            } else {
+                retriever.setDataSource(savedPath)
+            }
+            retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        } catch (_: Exception) {
+            0L
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private suspend fun cacheOfflineLyrics(
+        videoId: String,
+        title: String,
+        artist: String,
+        durationMs: Long,
+        savedPath: String
+    ) {
+        try {
+            val lyricsResult = lyricsRepository.fetchLyrics(
+                songId = videoId,
+                trackName = title,
+                artistName = artist,
+                durationSeconds = (durationMs / 1000L).toInt(),
+                localPath = savedPath
+            )
+            val lrcText = lyricsResult?.syncedLyrics?.takeIf { it.isNotBlank() }
+                ?: lyricsResult?.plainLyrics?.takeIf { it.isNotBlank() }
+            if (!lrcText.isNullOrBlank()) {
+                // 1. Always save permanent offline .lrc in app storage (works even with SAF content:// folders)
+                lyricsRepository.saveOfflineLrcFile(videoId, lrcText)
+                // 2. Also save companion .lrc next to filesystem audio file
+                if (!savedPath.startsWith("content://")) {
+                    val targetFile = File(savedPath)
+                    if (targetFile.exists()) {
+                        targetFile.parentFile?.let { parent ->
+                            runCatching {
+                                File(parent, "${targetFile.nameWithoutExtension}.lrc").writeText(lrcText)
+                            }
+                        }
+                    }
+                }
+                Log.i("DownloadWorker", "Saved offline lyrics for $videoId")
+            }
+        } catch (e: Exception) {
+            Log.e("DownloadWorker", "Failed to auto-cache lyrics or save companion .lrc for $videoId", e)
+        }
     }
 
     override suspend fun doWork(): Result {
@@ -171,6 +248,27 @@ class DownloadWorker @AssistedInject constructor(
             if (existing != null &&
                 BackupRestoreManager.checkFileExists(applicationContext, existing.localPath)
             ) {
+                // Backfill offline artwork & lyrics if an older download didn't save them locally
+                val artFile = File(File(context.filesDir, "artwork"), "$videoId.jpg")
+                if (!artFile.exists() || artFile.length() <= 512L || !existing.thumbnailUrl.startsWith("file://")) {
+                    val fixedThumb = downloadThumbnailLocally(
+                        videoId = videoId,
+                        remoteThumbnailUrl = existing.thumbnailUrl.ifBlank { thumbnailUrl },
+                        audioSavedPath = existing.localPath
+                    )
+                    if (fixedThumb.startsWith("file://")) {
+                        downloadedSongDao.insert(existing.copy(thumbnailUrl = fixedThumb))
+                        runCatching {
+                            val dbSong = songDao.getSongById(videoId) ?: songDao.getSongByVideoId(videoId)
+                            if (dbSong != null) songDao.updateSongArtwork(dbSong.id, fixedThumb)
+                        }
+                    }
+                }
+                val lrcBackup = File(File(context.filesDir, "lyrics"), "$videoId.lrc")
+                if (!lrcBackup.exists() || lrcBackup.length() <= 0L) {
+                    val durMs = if (existing.durationMs > 0L) existing.durationMs else extractDurationMs(existing.localPath)
+                    cacheOfflineLyrics(videoId, existing.title.ifBlank { title }, existing.artist.ifBlank { artist }, durMs, existing.localPath)
+                }
                 return Result.success(workDataOf(KEY_PROGRESS to 100))
             }
 
@@ -358,27 +456,9 @@ class DownloadWorker @AssistedInject constructor(
                 Log.e("DownloadWorker", "Failed to synchronize song metadata in SongDao", e)
             }
 
-            // Automatically download & cache lyrics + save companion .lrc file
-            try {
-                val lyricsResult = lyricsRepository.fetchLyrics(
-                    songId = videoId,
-                    trackName = title,
-                    artistName = artist,
-                    durationSeconds = (durationMs / 1000).toInt(),
-                    localPath = savedPath
-                )
-                val targetFile = File(savedPath)
-                if (targetFile.exists() && lyricsResult != null) {
-                    val lrcText = lyricsResult.syncedLyrics?.takeIf { it.isNotBlank() }
-                        ?: lyricsResult.plainLyrics?.takeIf { it.isNotBlank() }
-                    if (!lrcText.isNullOrBlank()) {
-                        val lrcFile = File(targetFile.parentFile, "${targetFile.nameWithoutExtension}.lrc")
-                        lrcFile.writeText(lrcText)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("DownloadWorker", "Failed to auto-cache lyrics or save companion .lrc for $videoId", e)
-            }
+            // Automatically download & cache lyrics in Room + filesDir/lyrics/<videoId>.lrc + companion .lrc
+            val effectiveDurationMs = if (durationMs > 0L) durationMs else extractDurationMs(savedPath)
+            cacheOfflineLyrics(videoId, title, artist, effectiveDurationMs, savedPath)
 
             setProgress(workDataOf(KEY_PROGRESS to 100))
             isSuccess = true

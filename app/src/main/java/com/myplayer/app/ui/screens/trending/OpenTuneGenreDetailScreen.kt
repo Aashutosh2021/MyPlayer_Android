@@ -111,6 +111,9 @@ fun OpenTuneGenreMoodDetailScreen(
     genreTitle: String,
     browseId: String? = null,
     params: String? = null,
+    preferredLanguages: Set<String> = emptySet(),
+    preferredGenres: Set<String> = emptySet(),
+    preferredArtists: Set<String> = emptySet(),
     innertubeApi: InnertubeApi,
     currentPlayingVideoId: String? = null,
     isPlaying: Boolean = false,
@@ -119,12 +122,17 @@ fun OpenTuneGenreMoodDetailScreen(
     onPlaySongs: (List<OnlineSong>, Int) -> Unit
 ) {
     var selectedPlaylistItem by remember { mutableStateOf<InnertubeApi.ExploreShelfItem?>(null) }
-    var shelves by remember(genreTitle, browseId, params) {
+    var shelves by remember(genreTitle, browseId, params, preferredLanguages, preferredGenres, preferredArtists) {
         mutableStateOf<List<InnertubeApi.ExploreGenreShelf>?>(
-            innertubeApi.getCachedGenreShelves(genreTitle)
+            innertubeApi.getCachedGenreShelves(
+                genreTitle = genreTitle,
+                preferredLanguages = preferredLanguages,
+                preferredGenres = preferredGenres,
+                preferredArtists = preferredArtists
+            )
         )
     }
-    var isLoading by remember(genreTitle, browseId, params) {
+    var isLoading by remember(genreTitle, browseId, params, preferredLanguages, preferredGenres, preferredArtists) {
         mutableStateOf(shelves.isNullOrEmpty())
     }
     var errorMessage by remember(genreTitle) { mutableStateOf<String?>(null) }
@@ -141,7 +149,10 @@ fun OpenTuneGenreMoodDetailScreen(
                     genreTitle = genreTitle,
                     browseId = browseId,
                     params = params,
-                    forceRefresh = forceRefresh
+                    forceRefresh = forceRefresh,
+                    preferredLanguages = preferredLanguages,
+                    preferredGenres = preferredGenres,
+                    preferredArtists = preferredArtists
                 )
             }.getOrNull()
 
@@ -155,7 +166,7 @@ fun OpenTuneGenreMoodDetailScreen(
         }
     }
 
-    LaunchedEffect(genreTitle, browseId, params) {
+    LaunchedEffect(genreTitle, browseId, params, preferredLanguages, preferredGenres, preferredArtists) {
         if (shelves.isNullOrEmpty()) {
             loadShelves(forceRefresh = false)
         }

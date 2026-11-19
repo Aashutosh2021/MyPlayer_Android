@@ -212,7 +212,7 @@ class SyncPlayManager @Inject constructor(
                         updateState {
                             it.copy(
                                 connectionState = SyncConnectionState.ERROR,
-                                errorMessage = event.throwable.message
+                                errorMessage = com.myplayer.app.playback.userErrorMessage("Sync Play connection error.", event.throwable)
                             )
                         }
                     }
@@ -480,7 +480,7 @@ class SyncPlayManager @Inject constructor(
                         val errorMsg = if (displayAddress.startsWith("10.0.2.") && !isEmulator()) {
                             "Cannot connect to $displayAddress: Host is an Android Emulator. Please make the physical device the Host (Master) instead."
                         } else {
-                            event.throwable.message ?: "Failed to connect to $displayAddress:$port"
+                            com.myplayer.app.playback.userErrorMessage("Failed to connect to host.", event.throwable)
                         }
                         updateState {
                             it.copy(

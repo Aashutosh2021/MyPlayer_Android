@@ -105,7 +105,9 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
                 libLoaded = true
             } catch (t: Throwable) {
                 libLoaded = false
-                libError = "${t.javaClass.simpleName}: ${t.message}"
+                if (com.myplayer.app.BuildConfig.DEBUG) {
+                    libError = "${t.javaClass.simpleName}: ${t.message}"
+                }
             }
         }
 
@@ -347,7 +349,9 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
                 )
             } catch (t: Throwable) {
                 nativeReady = false
-                nativeError = "${t.javaClass.simpleName}: ${t.message}"
+                if (com.myplayer.app.BuildConfig.DEBUG) {
+                    nativeError = "${t.javaClass.simpleName}: ${t.message}"
+                }
             }
         }
 
@@ -397,7 +401,9 @@ class MasterAudioDspProcessor @Inject constructor() : BaseAudioProcessor() {
                 processed = true
             } catch (t: Throwable) {
                 nativeReady = false
-                nativeError = "${t.javaClass.simpleName}: ${t.message}"
+                if (com.myplayer.app.BuildConfig.DEBUG) {
+                    nativeError = "${t.javaClass.simpleName}: ${t.message}"
+                }
                 _status.value = _status.value.copy(
                     usingKotlinFallback = true,
                     lastError = nativeError,

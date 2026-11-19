@@ -271,11 +271,11 @@ class MainViewModel @Inject constructor(
                     _downloadError.value = msg
                 }
             } catch (e: com.myplayer.app.data.online.YouTubeStreamBlockedException) {
-                val msg = e.message ?: "Download failed: YouTube stream blocked"
+                val msg = com.myplayer.app.playback.userErrorMessage("This track can't be downloaded right now.", e)
                 Log.e("MainViewModel", "[DOWNLOAD] $msg for '${song.title}' ($rawId)", e)
                 _downloadError.value = msg
             } catch (e: Exception) {
-                val msg = "Download failed: ${e.message ?: "Unknown error"}"
+                val msg = com.myplayer.app.playback.userErrorMessage("Download failed. Please try again.", e)
                 Log.e("MainViewModel", "[DOWNLOAD] $msg for '${song.title}' ($rawId)", e)
                 _downloadError.value = msg
             } finally {
@@ -352,10 +352,10 @@ class MainViewModel @Inject constructor(
                 res.onSuccess { savedLocation ->
                     _downloadError.value = "Saved $extLabel to: $savedLocation"
                 }.onFailure { err ->
-                    _downloadError.value = "Failed to save $extLabel file: ${err.message}"
+                    _downloadError.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", err)
                 }
             } catch (e: Exception) {
-                _downloadError.value = "Failed to save $extLabel file: ${e.message}"
+                _downloadError.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", e)
             }
         }
     }

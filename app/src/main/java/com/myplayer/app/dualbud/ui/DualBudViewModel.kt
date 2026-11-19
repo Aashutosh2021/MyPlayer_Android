@@ -126,10 +126,10 @@ class DualBudViewModel @Inject constructor(
                     _errorMessage.value = "Could not resolve stream URL for '${song.title}'"
                 }
             } catch (e: YouTubeStreamBlockedException) {
-                _errorMessage.value = e.message
+                _errorMessage.value = com.myplayer.app.playback.userErrorMessage("This track isn't available right now.", e)
             } catch (e: Exception) {
                 Log.e("DualBudViewModel", "Streaming failed for '${song.title}'", e)
-                _errorMessage.value = "Playback failed: ${e.localizedMessage ?: "Unknown error"}"
+                _errorMessage.value = com.myplayer.app.playback.userErrorMessage("Couldn't play '${song.title}'. Please try again.", e)
             } finally {
                 _loadingChannel.value = null
                 _resolvingSongId.value = null

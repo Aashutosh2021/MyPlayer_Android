@@ -133,7 +133,7 @@ class SettingsViewModel @Inject constructor(
             res.onSuccess { result ->
                 _spotifySyncMessage.value = "Synced ${result.playlistsCount} playlists & ${result.totalTracksSynced} songs from Spotify!"
             }.onFailure { e ->
-                _spotifySyncMessage.value = "Spotify sync failed: ${e.message}"
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("Spotify sync failed. Please try again.", e)
             }
         }
     }
@@ -153,7 +153,7 @@ class SettingsViewModel @Inject constructor(
                 _spotifySyncMessage.value =
                     "Synced ${result.playlistsCount} YouTube playlists, ${result.likedSongsCount} liked songs & ${result.recommendationsCount} AI recommendations!"
             }.onFailure { e ->
-                _spotifySyncMessage.value = "YouTube sync failed: ${e.message}"
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("YouTube sync failed. Please try again.", e)
             }
         }
     }
@@ -165,7 +165,7 @@ class SettingsViewModel @Inject constructor(
             res.onSuccess { (title, count) ->
                 _spotifySyncMessage.value = "Imported '$title' ($count songs) from YouTube!"
             }.onFailure { e ->
-                _spotifySyncMessage.value = "Failed to import YouTube playlist: ${e.message}"
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to import YouTube playlist.", e)
             }
         }
     }
@@ -206,7 +206,7 @@ class SettingsViewModel @Inject constructor(
                 musicRepository.addFolder(uri, name)
                 _spotifySyncMessage.value = "Added local music folder '$name' & scanned audio files!"
             } catch (e: Exception) {
-                _spotifySyncMessage.value = "Failed to scan folder: ${e.message}"
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to scan folder.", e)
             } finally {
                 _isScanningLocal.value = false
             }
@@ -227,7 +227,7 @@ class SettingsViewModel @Inject constructor(
                 musicRepository.rescanAllFolders()
                 _spotifySyncMessage.value = "Scanned local storage for audio files! Open Library > Local Files to play."
             } catch (e: Exception) {
-                _spotifySyncMessage.value = "Local scan failed: ${e.message}"
+                _spotifySyncMessage.value = com.myplayer.app.playback.userErrorMessage("Local scan failed.", e)
             } finally {
                 _isScanningLocal.value = false
             }
@@ -302,7 +302,7 @@ class SettingsViewModel @Inject constructor(
                 }
             } catch (e: NoInternetException) {
                 _updateState.value = ManualUpdateState.NoInternet(
-                    e.message ?: "No internet connection detected."
+                    com.myplayer.app.playback.userErrorMessage("No internet connection detected.", e)
                 )
             } catch (e: UnknownHostException) {
                 _updateState.value = ManualUpdateState.NoInternet(
@@ -315,7 +315,7 @@ class SettingsViewModel @Inject constructor(
                     e.message?.contains("rate limit", ignoreCase = true) == true ->
                         "GitHub rate limit reached. Please try again later."
                     else ->
-                        e.message ?: "Failed to check for updates. Please try again later."
+                        com.myplayer.app.playback.userErrorMessage("Failed to check for updates. Please try again later.", e)
                 }
                 _updateState.value = ManualUpdateState.Error(errorMsg)
             }
@@ -338,7 +338,9 @@ class SettingsViewModel @Inject constructor(
                 }
                 _backupState.value = BackupRestoreState.Success("Backup created successfully!")
             } catch (e: Exception) {
-                _backupState.value = BackupRestoreState.Error(e.message ?: "Failed to write backup file")
+                _backupState.value = BackupRestoreState.Error(
+                    com.myplayer.app.playback.userErrorMessage("Failed to write backup file.", e)
+                )
             }
         }
     }
@@ -357,7 +359,9 @@ class SettingsViewModel @Inject constructor(
                     "Backup restored! Playlists are ready — missing downloads will be re-downloaded in the background."
                 )
             } catch (e: Exception) {
-                _restoreState.value = BackupRestoreState.Error(e.message ?: "Failed to restore backup file")
+                _restoreState.value = BackupRestoreState.Error(
+                    com.myplayer.app.playback.userErrorMessage("Failed to restore backup file.", e)
+                )
             }
         }
     }

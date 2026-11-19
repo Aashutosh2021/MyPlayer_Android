@@ -82,6 +82,8 @@ class MusicController @Inject constructor(
     private var isNavigatingHistory = false
     private var lastIndex = C.INDEX_UNSET
     @Volatile private var currentQueueIndex: Int = 0
+    @Volatile private var lastSkipToNextEventMs: Long = 0L
+    @Volatile private var lastSkipToNextMediaId: String? = null
 
     // Online playback recovery & bounded retry state
     private val onlineRetryCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -163,7 +165,21 @@ class MusicController @Inject constructor(
                         playOnlineQueueIndex(playIndex)
                     }
                 } else if (event is PlaybackEvent.SkipToNextRequested) {
-                    skipToNext()
+                    val activeMediaId = mediaController?.currentMediaItem?.mediaId
+                    val nowMs = android.os.SystemClock.elapsedRealtime()
+                    val isDuplicateForSameTrack = !activeMediaId.isNullOrBlank() &&
+                        activeMediaId == lastSkipToNextMediaId &&
+                        (nowMs - lastSkipToNextEventMs) < 2_500L
+                    if (isDuplicateForSameTrack || audioFeatureManagers.isCrossfading) {
+                        Log.d("MusicController", "Ignoring duplicate/in-progress SkipToNextRequested for $activeMediaId")
+                    } else {
+                        lastSkipToNextMediaId = activeMediaId
+                        lastSkipToNextEventMs = nowMs
+                        if (!activeMediaId.isNullOrBlank()) {
+                            playbackCompletionGuard.isAlreadyHandled(activeMediaId)
+                        }
+                        skipToNext(fromAutoCrossfade = audioFeatureManagers.awaitingOnlineCrossfadeNext)
+                    }
                 } else if (event is PlaybackEvent.SkipToPreviousRequested) {
                     skipToPrevious()
                 }
@@ -243,7 +259,7 @@ class MusicController @Inject constructor(
 
                     if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
                         // Only allow single-item repeat when user explicitly selected REPEAT_MODE_ONE
-                        if (playbackStateManager.repeatMode.value != Player.REPEAT_MODE_ONE) {
+                        if (controller.mediaItemCount <= 1 && playbackStateManager.repeatMode.value != Player.REPEAT_MODE_ONE) {
                             Log.d("MusicController", "Single track repeat intercepted - advancing queue")
                             handlePlaybackEnded()
                             return
@@ -360,6 +376,10 @@ class MusicController @Inject constructor(
                 } else if (playbackState == Player.STATE_ENDED) {
                     if (activeRecoveryJob?.isActive == true) {
                         Log.d("MusicController", "Ignoring STATE_ENDED while online recovery is active")
+                        return
+                    }
+                    if (audioFeatureManagers.isCrossfading || audioFeatureManagers.awaitingOnlineCrossfadeNext) {
+                        Log.d("MusicController", "Ignoring STATE_ENDED while crossfade transition is active")
                         return
                     }
                     val mediaId = mediaController?.currentMediaItem?.mediaId
@@ -645,6 +665,41 @@ class MusicController @Inject constructor(
         }
     }
 
+    /**
+     * Resolves locally downloaded artwork (`filesDir/artwork/<id>.jpg` or companion `.jpg`)
+     * before falling back to remote URLs so offline playback always displays the song poster
+     * even when the song's DB/playlist metadata still holds a googleusercontent.com URL.
+     */
+    private fun resolveOfflineArtworkUri(song: SongEntity): String? {
+        val artDir = java.io.File(context.filesDir, "artwork")
+        val candidateIds = listOfNotNull(
+            song.videoId?.takeIf { it.isNotBlank() },
+            song.id.removePrefix("online://").removePrefix("spotify:").takeIf { it.isNotBlank() },
+            song.id.takeIf { it.isNotBlank() }
+        ).distinct()
+        for (cid in candidateIds) {
+            val localArtFile = java.io.File(artDir, "$cid.jpg")
+            if (localArtFile.exists() && localArtFile.length() > 512L) {
+                return android.net.Uri.fromFile(localArtFile).toString()
+            }
+        }
+        if (song.path.startsWith("/") || song.path.startsWith("file://")) {
+            val cleanPath = if (song.path.startsWith("file://")) android.net.Uri.parse(song.path).path else song.path
+            if (!cleanPath.isNullOrBlank()) {
+                val audioFile = java.io.File(cleanPath)
+                val companionJpg = audioFile.parentFile?.let { java.io.File(it, "${audioFile.nameWithoutExtension}.jpg") }
+                if (companionJpg != null && companionJpg.exists() && companionJpg.length() > 512L) {
+                    return android.net.Uri.fromFile(companionJpg).toString()
+                }
+            }
+        }
+        return when {
+            !song.albumArt.isNullOrBlank() -> song.albumArt
+            !song.videoId.isNullOrBlank() -> "https://img.youtube.com/vi/${song.videoId}/hqdefault.jpg"
+            else -> null
+        }
+    }
+
     private fun updateCurrentSong() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             Handler(Looper.getMainLooper()).post { updateCurrentSong() }
@@ -668,17 +723,7 @@ class MusicController @Inject constructor(
         } else null
 
         if (song != null) {
-            val ytId = song.videoId?.takeIf { it.isNotBlank() } ?: song.id
-            val localArtFile = java.io.File(java.io.File(context.filesDir, "artwork"), "$ytId.jpg")
-            val resolvedArt = when {
-                localArtFile.exists() && localArtFile.length() > 512L ->
-                    android.net.Uri.fromFile(localArtFile).toString()
-                !song.albumArt.isNullOrBlank() ->
-                    song.albumArt
-                !song.videoId.isNullOrBlank() ->
-                    "https://img.youtube.com/vi/${song.videoId}/hqdefault.jpg"
-                else -> null
-            }
+            val resolvedArt = resolveOfflineArtworkUri(song)
             val songWithArt = if (song.albumArt != resolvedArt && !resolvedArt.isNullOrBlank()) {
                 song.copy(albumArt = resolvedArt)
             } else {
@@ -835,6 +880,7 @@ class MusicController @Inject constructor(
 
     fun playSongs(songs: List<SongEntity>, startIndex: Int = 0) {
         if (songs.isEmpty()) return
+        audioFeatureManagers.abortActiveCrossfade(scope)
         cancelActiveRecovery("playSongs")
         isCurrentTrackAutoplayRecommendation = false
         val clampedIndex = startIndex.coerceIn(0, songs.size - 1)
@@ -863,7 +909,11 @@ class MusicController @Inject constructor(
         _playbackQueue.value = _songQueue.toList()
         currentQueueIndex = clampedIndex
 
-        val targetSong = songs[clampedIndex]
+        val rawTarget = songs[clampedIndex]
+        val resolvedTargetArt = resolveOfflineArtworkUri(rawTarget)
+        val targetSong = if (!resolvedTargetArt.isNullOrBlank() && rawTarget.albumArt != resolvedTargetArt) {
+            rawTarget.copy(albumArt = resolvedTargetArt)
+        } else rawTarget
         val isTargetLocal = targetSong.path.startsWith("/") || targetSong.path.startsWith("content://") || targetSong.path.startsWith("file://")
         if (isTargetLocal) {
             playbackStateManager.updateCurrentOnlineSong(null)
@@ -874,7 +924,7 @@ class MusicController @Inject constructor(
                     videoId = resolvedVideoId,
                     title = targetSong.title,
                     artist = targetSong.artist,
-                    thumbnailUrl = targetSong.albumArt ?: "https://img.youtube.com/vi/$resolvedVideoId/hqdefault.jpg",
+                    thumbnailUrl = resolvedTargetArt ?: "https://img.youtube.com/vi/$resolvedVideoId/hqdefault.jpg",
                     durationMs = targetSong.duration
                 )
             )
@@ -961,6 +1011,7 @@ class MusicController @Inject constructor(
 
     fun playOnlineSongs(songs: List<OnlineSong>, startIndex: Int = 0) {
         if (songs.isEmpty()) return
+        audioFeatureManagers.abortActiveCrossfade(scope)
         cancelActiveRecovery("playOnlineSongs")
         isCurrentTrackAutoplayRecommendation = false
         val clampedIndex = startIndex.coerceIn(0, songs.size - 1)
@@ -1040,9 +1091,10 @@ class MusicController @Inject constructor(
         if (index !in _songQueue.indices) return
         cancelActiveRecovery("playOnlineQueueIndex")
         currentQueueIndex = index
-        val targetEntity = _songQueue[index]
-        val vId = targetEntity.videoId ?: targetEntity.id
-        val artUrl = targetEntity.albumArt ?: "https://img.youtube.com/vi/$vId/hqdefault.jpg"
+        val rawTargetEntity = _songQueue[index]
+        val vId = rawTargetEntity.videoId ?: rawTargetEntity.id
+        val artUrl = resolveOfflineArtworkUri(rawTargetEntity) ?: "https://img.youtube.com/vi/$vId/hqdefault.jpg"
+        val targetEntity = if (rawTargetEntity.albumArt != artUrl) rawTargetEntity.copy(albumArt = artUrl) else rawTargetEntity
         val onlineSong = OnlineSong(
             videoId = vId,
             title = targetEntity.title,
@@ -1153,7 +1205,10 @@ class MusicController @Inject constructor(
         runOnApplicationThread { it.pause() }
     }
 
-    fun skipToNext() {
+    fun skipToNext(fromAutoCrossfade: Boolean = false) {
+        if (!fromAutoCrossfade && (audioFeatureManagers.isCrossfading || audioFeatureManagers.awaitingOnlineCrossfadeNext)) {
+            audioFeatureManagers.abortActiveCrossfade(scope)
+        }
         cancelActiveRecovery("skipToNext")
         if (syncPlaybackInterceptor?.onTrackSkipRequested(isNext = true) == true) {
             return
@@ -1191,6 +1246,9 @@ class MusicController @Inject constructor(
     }
 
     fun skipToPrevious() {
+        if (audioFeatureManagers.isCrossfading || audioFeatureManagers.awaitingOnlineCrossfadeNext) {
+            audioFeatureManagers.abortActiveCrossfade(scope)
+        }
         cancelActiveRecovery("skipToPrevious")
         if (syncPlaybackInterceptor?.onTrackSkipRequested(isNext = false) == true) {
             return
@@ -1335,8 +1393,8 @@ class MusicController @Inject constructor(
                 } else null
 
                 if (effectiveSong != null) {
-                    val resolvedArt = effectiveSong.albumArt ?: effectiveSong.videoId?.let { "https://img.youtube.com/vi/$it/hqdefault.jpg" }
-                    val songWithArt = if (effectiveSong.albumArt.isNullOrBlank() && !resolvedArt.isNullOrBlank()) {
+                    val resolvedArt = resolveOfflineArtworkUri(effectiveSong)
+                    val songWithArt = if (!resolvedArt.isNullOrBlank() && effectiveSong.albumArt != resolvedArt) {
                         effectiveSong.copy(albumArt = resolvedArt)
                     } else {
                         effectiveSong
@@ -1609,6 +1667,7 @@ class MusicController @Inject constructor(
     }
 
     fun playQueueIndex(index: Int) {
+        audioFeatureManagers.abortActiveCrossfade(scope)
         if (index in _songQueue.indices) {
             val target = _songQueue[index]
             val isOnline = target.path.startsWith("http") ||

@@ -293,7 +293,7 @@ class MeldListenTogetherManager @Inject constructor(
                     _uiState.update {
                         it.copy(
                             connectionState = LtConnectionState.ERROR,
-                            errorMessage = "Connection error: ${t.message ?: "Failed to reach server"}"
+                            errorMessage = com.myplayer.app.playback.userErrorMessage("Couldn't connect to Listen Together server.", t)
                         )
                     }
                 }

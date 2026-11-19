@@ -47,29 +47,24 @@ object WhatsNewRepository {
 
     fun getCurrentFeatures(): List<WhatsNewFeature> = listOf(
         WhatsNewFeature(
+            icon = Icons.Filled.Explore,
+            title = "Explore Moods & Genres + Personalized Taste Mix",
+            description = "Browse multi-section Mood & Genre carousels blended 50/50 with your music taste and Bollywood/Indian mixes, with dedicated covers and zero duplicate song thumbnails."
+        ),
+        WhatsNewFeature(
             icon = Icons.Filled.GraphicEq,
-            title = "True Dual-Deck Equal-Power Crossfade & Blend Skips",
-            description = "Zero-dropout overlapping DJ transitions with isolated full-DSP decks, constant-power volume curves (no mid-fade silence), Blend Manual Skips, and 5 Crossmix styles in Audio Lab."
+            title = "Direct Manual Skips & Crossfade Stability Fix",
+            description = "Crossfade now runs strictly on automatic end-of-track transitions so manual Next/Previous skips and song taps switch instantly without double-skipping."
         ),
         WhatsNewFeature(
-            icon = Icons.Filled.SystemUpdate,
-            title = "In-App APK Updater & Beta Channel",
-            description = "Download and install official MyPlayer APK updates directly inside the app with live progress notifications, ABI matching, 24-hour snooze, and optional Beta/Nightly release checks."
+            icon = Icons.Filled.Lyrics,
+            title = "Offline Artwork & Synced Lyrics Fix",
+            description = "Offline downloads and MP3/M4A exports reliably save album posters and .lrc lyrics—including custom SAF folders—and backfill older downloads."
         ),
         WhatsNewFeature(
-            icon = Icons.Filled.LibraryMusic,
-            title = "Redesigned Library, Home Speed Dial & Morphing Nav Bar",
-            description = "Refreshed Library hub (Listening Experience card, Liked, Downloads, Local files, Replay, Playlists), upgraded Home Speed Dial & Trending Hotlist, and fluid morphing navigation."
-        ),
-        WhatsNewFeature(
-            icon = Icons.Filled.Tv,
-            title = "Android TV Mode & Headphone AutoEq / USB DAC",
-            description = "Added dedicated Android TV UI with mobile QR remote control, AutoEq headphone correction profiles, SponsorBlock skipping, DLNA Wi-Fi casting, and Bit-Perfect USB DAC support."
-        ),
-        WhatsNewFeature(
-            icon = Icons.Filled.AudioFile,
-            title = "Single-Folder Local Scanner & MP3 / M4A Export",
-            description = "Pick your local music folder in Library or Settings, reorder playlists reliably, and export songs directly as MP3 or M4A alongside offline cached playback."
+            icon = Icons.Filled.Speed,
+            title = "Lighter APK & Cleaner Release Errors",
+            description = "Trimmed unused code and assets to slim down the app (~18.2 MB release APK) and replaced developer trace text with clear user-friendly messages."
         )
     )
 }

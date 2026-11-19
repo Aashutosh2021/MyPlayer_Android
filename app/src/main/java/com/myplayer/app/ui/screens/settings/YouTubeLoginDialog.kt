@@ -96,10 +96,14 @@ fun YouTubeLoginDialog(
                 }
                 .onFailure { err ->
                     statusText = null
-                    loginError = err.message ?: "YouTube login failed"
+                    val userMsg = com.myplayer.app.playback.userErrorMessage(
+                        "Couldn't sign in to YouTube Music. Please try again.",
+                        err
+                    )
+                    loginError = userMsg
                     Toast.makeText(
                         context,
-                        "Login error: ${err.message ?: "Unknown"}",
+                        userMsg,
                         Toast.LENGTH_SHORT
                     ).show()
                     tokenFetchStarted.set(false)
@@ -124,7 +128,10 @@ fun YouTubeLoginDialog(
                 }
                 .onFailure { err ->
                     statusText = null
-                    loginError = err.message ?: "Playlist import failed"
+                    loginError = com.myplayer.app.playback.userErrorMessage(
+                        "Couldn't import YouTube playlist. Check the link and try again.",
+                        err
+                    )
                     tokenFetchStarted.set(false)
                 }
         }

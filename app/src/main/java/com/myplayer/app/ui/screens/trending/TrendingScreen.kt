@@ -41,7 +41,19 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Nightlife
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Spa
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -183,6 +195,9 @@ fun TrendingScreen(
             genreTitle = currentMood.title,
             browseId = currentMood.browseId.takeIf { it.isNotBlank() },
             params = currentMood.params,
+            preferredLanguages = selectedLanguages,
+            preferredGenres = selectedGenres,
+            preferredArtists = selectedArtists,
             innertubeApi = viewModel.innertubeApi,
             currentPlayingVideoId = currentOnlineSong?.videoId ?: currentSong?.videoId ?: currentSong?.id,
             isPlaying = isPlaying,
@@ -224,16 +239,21 @@ fun TrendingScreen(
         (recommendations + homeRecommendations).distinctBy { it.videoId }
     }
 
+    // Track individual song thumbnails so Mood/Genre cards never duplicate them
+    val trackThumbnailSet = remember(allPool) {
+        allPool.mapNotNull { it.thumbnailUrl.takeIf { u -> u.isNotBlank() } }.toSet()
+    }
+
     // Merge default moods/genres with live YouTube Music moods/genres
-    val mergedMoodsAndGenres = remember(remoteMoodsAndGenres, allPool) {
+    // coverUrl is intentionally null so each Mood/Genre tile fetches its OWN cover by name/genre
+    val mergedMoodsAndGenres = remember(remoteMoodsAndGenres) {
         val out = mutableListOf<ExploreBoardTile.MoodCard>()
         val seen = HashSet<String>()
 
-        EXPLORE_MOODS_AND_GENRES.forEachIndexed { idx, seed ->
+        EXPLORE_MOODS_AND_GENRES.forEach { seed ->
             val remoteMatch = remoteMoodsAndGenres.firstOrNull {
                 it.title.equals(seed.title, ignoreCase = true)
             }
-            val sampleCover = allPool.getOrNull(idx % allPool.size.coerceAtLeast(1))?.thumbnailUrl
             if (seen.add(seed.title.lowercase())) {
                 out.add(
                     ExploreBoardTile.MoodCard(
@@ -243,16 +263,15 @@ fun TrendingScreen(
                         browseId = remoteMatch?.browseId.orEmpty(),
                         params = remoteMatch?.params,
                         isGenre = remoteMatch?.isGenre ?: seed.isGenre,
-                        coverUrl = sampleCover,
+                        coverUrl = null,
                         heightDp = STAGGERED_HEIGHTS[abs(seed.title.hashCode()) % STAGGERED_HEIGHTS.size]
                     )
                 )
             }
         }
 
-        remoteMoodsAndGenres.forEachIndexed { idx, remote ->
+        remoteMoodsAndGenres.forEach { remote ->
             if (seen.add(remote.title.lowercase())) {
-                val sampleCover = allPool.getOrNull((idx + 5) % allPool.size.coerceAtLeast(1))?.thumbnailUrl
                 out.add(
                     ExploreBoardTile.MoodCard(
                         key = "mood_remote_${remote.title}_${remote.params}",
@@ -261,7 +280,7 @@ fun TrendingScreen(
                         browseId = remote.browseId,
                         params = remote.params,
                         isGenre = remote.isGenre,
-                        coverUrl = sampleCover,
+                        coverUrl = null,
                         heightDp = STAGGERED_HEIGHTS[abs(remote.title.hashCode()) % STAGGERED_HEIGHTS.size]
                     )
                 )
@@ -795,6 +814,7 @@ fun TrendingScreen(
                                     browseId = tile.browseId,
                                     params = tile.params,
                                     initialCoverUrl = tile.coverUrl,
+                                    avoidCoverUrls = trackThumbnailSet,
                                     innertubeApi = viewModel.innertubeApi,
                                     height = tile.heightDp,
                                     onClick = {
@@ -883,6 +903,24 @@ private fun ExploreFeatureActionCard(
  * Lazily fetches the first cover from the mood's playlists behind a scrim in the mood's own HSV color,
  * with the bold mood/genre name at the bottom-left. Clicking opens `OpenTuneGenreMoodDetailScreen`.
  */
+private fun moodGenreFallbackIcon(title: String): ImageVector {
+    val lower = title.lowercase()
+    return when {
+        "workout" in lower || "gym" in lower || "fitness" in lower -> Icons.Filled.FitnessCenter
+        "chill" in lower || "lo-fi" in lower || "lofi" in lower || "calm" in lower -> Icons.Filled.Spa
+        "commute" in lower || "drive" in lower || "road" in lower -> Icons.Filled.DirectionsCar
+        "energize" in lower || "energy" in lower || "pump" in lower -> Icons.Filled.Bolt
+        "party" in lower || "dance" in lower || "club" in lower -> Icons.Filled.Nightlife
+        "gaming" in lower || "game" in lower -> Icons.Filled.SportsEsports
+        "focus" in lower || "study" in lower || "classical" in lower -> Icons.Filled.AutoStories
+        "sleep" in lower || "night" in lower || "ambient" in lower -> Icons.Filled.Bedtime
+        "romance" in lower || "love" in lower -> Icons.Filled.Favorite
+        "sad" in lower || "heartbreak" in lower -> Icons.Filled.WaterDrop
+        "feel good" in lower || "happy" in lower -> Icons.Filled.WbSunny
+        else -> Icons.Filled.MusicNote
+    }
+}
+
 @Composable
 private fun OpenTuneMoodTile(
     title: String,
@@ -890,18 +928,27 @@ private fun OpenTuneMoodTile(
     browseId: String,
     params: String?,
     initialCoverUrl: String?,
+    avoidCoverUrls: Set<String> = emptySet(),
     innertubeApi: InnertubeApi,
     height: Dp,
     onClick: () -> Unit
 ) {
     val hue = (abs(title.hashCode()) % 360).toFloat()
     val moodColor = Color.hsv(hue, 0.65f, 0.55f)
-    var resolvedCover by remember(title, initialCoverUrl) { mutableStateOf(initialCoverUrl) }
+    val moodAccent = Color.hsv((hue + 28f) % 360f, 0.72f, 0.34f)
+    var resolvedCover by remember(title, browseId, params) {
+        mutableStateOf(initialCoverUrl?.takeIf { it.isNotBlank() && it !in avoidCoverUrls })
+    }
 
     LaunchedEffect(title, browseId, params) {
         if (resolvedCover.isNullOrBlank()) {
             resolvedCover = runCatching {
-                innertubeApi.fetchFirstCoverForMood(title, browseId.takeIf { it.isNotBlank() }, params)
+                innertubeApi.fetchFirstCoverForMood(
+                    genreTitle = title,
+                    browseId = browseId.takeIf { it.isNotBlank() },
+                    params = params,
+                    avoidUrls = avoidCoverUrls
+                )
             }.getOrNull()
         }
     }
@@ -911,9 +958,19 @@ private fun OpenTuneMoodTile(
             .fillMaxWidth()
             .height(height)
             .clip(RoundedCornerShape(22.dp))
-            .background(moodColor)
+            .background(Brush.linearGradient(listOf(moodColor, moodAccent)))
             .bouncyPopClick(onClick = onClick)
     ) {
+        // Thematic decorative icon watermark visible while loading or when offline
+        Icon(
+            imageVector = moodGenreFallbackIcon(title),
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.18f),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(14.dp)
+                .size(56.dp)
+        )
         AnimatedVisibility(
             visible = !resolvedCover.isNullOrBlank(),
             enter = fadeIn(tween(450)),

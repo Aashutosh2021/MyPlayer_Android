@@ -191,18 +191,9 @@ class MusicService : MediaSessionService() {
 
     private fun shouldCrossfadeIncomingSetMediaItems(targetDeck: ExoPlayer): Boolean {
         if (targetDeck !== this.player) return false
-        if (audioFeatureManagers.awaitingOnlineCrossfadeNext &&
+        // Only crossfade on automatic end-of-track transitions (never on manual song changes)
+        return audioFeatureManagers.awaitingOnlineCrossfadeNext &&
             (targetDeck.isPlaying || targetDeck.playWhenReady || targetDeck.playbackState == Player.STATE_READY)
-        ) {
-            return true
-        }
-        // Also support MyPlayer "Blend Skips" (Manual Crossfade) when enabled in Audio Lab
-        val manualBlendOn = com.myplayer.app.ui.myplayer.MyPlayerAudioFxDspBridge.manualCrossfadeEnabled &&
-            !audioFeatureManagers.isCrossfading &&
-            (targetDeck.isPlaying || targetDeck.playWhenReady) &&
-            targetDeck.currentPosition > 1_000L &&
-            targetDeck.repeatMode != Player.REPEAT_MODE_ONE
-        return manualBlendOn
     }
 
     private fun buildForwardingPlayer(deckPlayer: ExoPlayer): Player {
@@ -330,16 +321,10 @@ class MusicService : MediaSessionService() {
 
             override fun seekToNext() {
                 val active = this@MusicService.player
+                if (audioFeatureManagers.isCrossfading || audioFeatureManagers.awaitingOnlineCrossfadeNext) {
+                    audioFeatureManagers.abortActiveCrossfade(serviceScope)
+                }
                 if (active.mediaItemCount > 1 && active.hasNextMediaItem()) {
-                    if (audioFeatureManagers.tryManualMultiItemSkipCrossfade(
-                            scope = serviceScope,
-                            host = crossfadeHost,
-                            outgoingPlayer = active,
-                            targetIndex = active.nextMediaItemIndex
-                        )
-                    ) {
-                        return
-                    }
                     active.seekToNext()
                 } else {
                     playbackEventBus.emit(PlaybackEvent.SkipToNextRequested)
@@ -352,18 +337,10 @@ class MusicService : MediaSessionService() {
 
             override fun seekToPrevious() {
                 val active = this@MusicService.player
-                if (active.currentPosition <= 3_000L && active.mediaItemCount > 1 && active.hasPreviousMediaItem()) {
-                    if (audioFeatureManagers.tryManualMultiItemSkipCrossfade(
-                            scope = serviceScope,
-                            host = crossfadeHost,
-                            outgoingPlayer = active,
-                            targetIndex = active.previousMediaItemIndex
-                        )
-                    ) {
-                        return
-                    }
-                    active.seekToPrevious()
-                } else if (active.mediaItemCount > 1 && active.hasPreviousMediaItem()) {
+                if (audioFeatureManagers.isCrossfading || audioFeatureManagers.awaitingOnlineCrossfadeNext) {
+                    audioFeatureManagers.abortActiveCrossfade(serviceScope)
+                }
+                if (active.mediaItemCount > 1 && active.hasPreviousMediaItem()) {
                     active.seekToPrevious()
                 } else {
                     playbackEventBus.emit(PlaybackEvent.SkipToPreviousRequested)

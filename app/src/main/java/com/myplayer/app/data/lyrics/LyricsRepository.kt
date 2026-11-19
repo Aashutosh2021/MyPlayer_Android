@@ -84,7 +84,7 @@ class LyricsRepository @Inject constructor(
             "https://lyricsplus.prjktla.workers.dev",
             "https://lyricsplus-seven.vercel.app"
         )
-        private const val USER_AGENT = "MyPlayer/6.8 (https://myplayer-660ee.web.app)"
+        private const val USER_AGENT = "MyPlayer/6.9 (https://myplayer-660ee.web.app)"
 
         private val LRC_LINE_REGEX = Regex("""^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$""")
         private val WORD_TAG_REGEX = Regex("""<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>\s*([^<]+)""")
@@ -186,8 +186,28 @@ class LyricsRepository @Inject constructor(
             if (cleanId.isNotBlank() && cleanId != songId) {
                 cachedLyricsDao.insertLyrics(entity.copy(songId = cleanId))
             }
+            val lrcText = result.syncedLyrics?.takeIf { it.isNotBlank() }
+                ?: result.plainLyrics?.takeIf { it.isNotBlank() }
+            if (!lrcText.isNullOrBlank()) {
+                saveOfflineLrcFile(cleanId.ifBlank { songId }, lrcText)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed caching lyrics for $songId", e)
+        }
+    }
+
+    fun saveOfflineLrcFile(songId: String, lrcText: String): File? {
+        if (songId.isBlank() || lrcText.isBlank()) return null
+        val cleanId = songId.removePrefix("online://").removePrefix("spotify:track:").removePrefix("spotify:").trim()
+        if (cleanId.isBlank()) return null
+        return try {
+            val lyricsDir = File(context.filesDir, "lyrics").apply { mkdirs() }
+            val outFile = File(lyricsDir, "$cleanId.lrc")
+            outFile.writeText(lrcText)
+            outFile
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed saving offline .lrc for $cleanId", e)
+            null
         }
     }
 
@@ -451,8 +471,16 @@ class LyricsRepository @Inject constructor(
         localPath: String?
     ): LyricsResult? {
         try {
+            val cleanId = songId.removePrefix("online://").removePrefix("spotify:track:").removePrefix("spotify:").trim()
             val candidateLrcFiles = mutableListOf<File>()
-            if (!localPath.isNullOrBlank() && !localPath.startsWith("http")) {
+            val lyricsDir = File(context.filesDir, "lyrics")
+            if (cleanId.isNotBlank()) {
+                candidateLrcFiles.add(File(lyricsDir, "$cleanId.lrc"))
+            }
+            if (songId.isNotBlank() && songId != cleanId) {
+                candidateLrcFiles.add(File(lyricsDir, "$songId.lrc"))
+            }
+            if (!localPath.isNullOrBlank() && !localPath.startsWith("http") && !localPath.startsWith("online://") && !localPath.startsWith("content://")) {
                 val cleanFilePath = if (localPath.startsWith("file://")) {
                     android.net.Uri.parse(localPath).path ?: localPath
                 } else localPath
@@ -464,9 +492,17 @@ class LyricsRepository @Inject constructor(
                 }
             }
             val musicDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir
-            val safeTitle = trackName.replace(Regex("[^a-zA-Z0-9 _\\-]"), "").replace(Regex(" {2,}"), " ").trim().take(60)
+            val safeTitle = trackName.replace(Regex("[^\\p{L}\\p{N} _\\-]"), "").replace(Regex(" {2,}"), " ").trim().take(60)
             if (safeTitle.isNotBlank()) {
+                if (cleanId.isNotBlank()) {
+                    candidateLrcFiles.add(File(musicDir, "$safeTitle [$cleanId].lrc"))
+                }
                 candidateLrcFiles.add(File(musicDir, "$safeTitle.lrc"))
+            }
+            if (cleanId.isNotBlank() && musicDir.exists()) {
+                musicDir.listFiles()?.firstOrNull { f ->
+                    f.isFile && f.name.endsWith("[$cleanId].lrc", ignoreCase = true)
+                }?.let { candidateLrcFiles.add(it) }
             }
             for (lrcFile in candidateLrcFiles) {
                 if (lrcFile.exists() && lrcFile.length() > 0L) {
@@ -551,6 +587,10 @@ class LyricsRepository @Inject constructor(
     suspend fun deleteLyrics(songId: String) = withContext(Dispatchers.IO) {
         try {
             cachedLyricsDao.deleteLyricsForSong(songId)
+            val cleanId = songId.removePrefix("online://").removePrefix("spotify:track:").removePrefix("spotify:").trim()
+            if (cleanId.isNotBlank()) {
+                File(File(context.filesDir, "lyrics"), "$cleanId.lrc").takeIf { it.exists() }?.delete()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to delete lyrics for $songId", e)
         }

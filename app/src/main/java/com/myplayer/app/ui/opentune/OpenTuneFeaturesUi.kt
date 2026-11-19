@@ -1800,7 +1800,7 @@ fun OpenTuneAutoEqDialog(
     LaunchedEffect(Unit) {
         isLoadingIndex = true
         allEntries = runCatching { autoEqManager.loadIndex() }.getOrElse {
-            statusError = "Couldn't load AutoEq index: ${it.message}"
+            statusError = com.myplayer.app.playback.userErrorMessage("Couldn't load headphone profiles.", it)
             emptyList()
         }
         isLoadingIndex = false

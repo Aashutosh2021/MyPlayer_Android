@@ -205,7 +205,9 @@ class InAppUpdateManager @Inject constructor(
             )
             true
         } catch (e: Exception) {
-            _downloadState.value = InAppDownloadState.Error("Failed to launch installer: ${e.message}")
+            _downloadState.value = InAppDownloadState.Error(
+                com.myplayer.app.playback.userErrorMessage("Failed to launch installer. Please check install permissions.", e)
+            )
             false
         }
     }
@@ -349,7 +351,7 @@ class InAppUpdateManager @Inject constructor(
             } catch (e: Exception) {
                 tempFile.delete()
                 _downloadState.value = InAppDownloadState.Error(
-                    e.message ?: "Download failed. Please check your connection and try again."
+                    com.myplayer.app.playback.userErrorMessage("Download failed. Please check your connection and try again.", e)
                 )
                 cancelNotification()
             }

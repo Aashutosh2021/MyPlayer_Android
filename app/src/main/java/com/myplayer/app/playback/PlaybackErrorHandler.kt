@@ -29,6 +29,27 @@ enum class PlaybackErrorType {
     UNKNOWN
 }
 
+/**
+ * Returns a clean user-facing error message in release builds,
+ * appending developer exception details only in debug builds.
+ */
+fun userErrorMessage(
+    userFallback: String,
+    cause: Throwable?,
+    includeDebugDetail: Boolean = com.myplayer.app.BuildConfig.DEBUG
+): String = userErrorMessage(userFallback, cause?.localizedMessage ?: cause?.message, includeDebugDetail)
+
+fun userErrorMessage(
+    userFallback: String,
+    debugDetail: String?,
+    includeDebugDetail: Boolean = com.myplayer.app.BuildConfig.DEBUG
+): String =
+    if (includeDebugDetail && !debugDetail.isNullOrBlank()) {
+        "$userFallback ($debugDetail)"
+    } else {
+        userFallback
+    }
+
 @Singleton
 class PlaybackErrorHandler internal constructor(
     private val context: Context?,
@@ -110,8 +131,8 @@ class PlaybackErrorHandler internal constructor(
                 "Corrupt audio stream format."
 
             else ->
-                if (isOnline) "Failed to play online stream: ${error.message ?: error.errorCodeName}"
-                else "Playback error: ${error.message ?: error.errorCodeName}"
+                if (isOnline) userErrorMessage("Couldn't play this online stream. Please try again.", error.message ?: error.errorCodeName)
+                else userErrorMessage("Unable to play this audio track.", error.message ?: error.errorCodeName)
         }
     }
 

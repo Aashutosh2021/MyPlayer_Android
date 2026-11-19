@@ -259,10 +259,10 @@ class PlaylistDetailViewModel @Inject constructor(
                 res.onSuccess { savedLoc ->
                     _exportStatusMessage.value = "Saved $extLabel to: $savedLoc"
                 }.onFailure { err ->
-                    _exportStatusMessage.value = "Failed to save $extLabel: ${err.message}"
+                    _exportStatusMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", err)
                 }
             } catch (e: Exception) {
-                _exportStatusMessage.value = "Failed to save $extLabel: ${e.message}"
+                _exportStatusMessage.value = com.myplayer.app.playback.userErrorMessage("Failed to save $extLabel file.", e)
             }
         }
     }

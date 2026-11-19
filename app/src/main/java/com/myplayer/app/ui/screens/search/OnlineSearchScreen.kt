@@ -696,7 +696,11 @@ fun OnlineResultsList(
                     Spacer(Modifier.height(24.dp))
                     Text("Couldn't reach server", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.height(4.dp))
-                    Text(e.message ?: "Unknown error", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    Text(
+                        com.myplayer.app.playback.userErrorMessage("Check your internet connection and try again.", e),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = { results.retry() }, colors = ButtonDefaults.buttonColors(containerColor = ClayPrimary)) { Text("Retry") }
                 }

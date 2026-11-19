@@ -863,8 +863,29 @@ class InnertubeApi(
     private val collectionPageCache = java.util.concurrent.ConcurrentHashMap<String, ExploreCollectionPage>()
     private val moodCoverCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    fun getCachedGenreShelves(genreTitle: String): List<ExploreGenreShelf>? =
-        genreShelvesCache[genreTitle.trim().lowercase()]
+    private fun buildGenreTasteCacheKey(
+        genreTitle: String,
+        preferredLanguages: Set<String> = emptySet(),
+        preferredGenres: Set<String> = emptySet(),
+        preferredArtists: Set<String> = emptySet()
+    ): String {
+        val base = genreTitle.trim().lowercase()
+        if (preferredLanguages.isEmpty() && preferredGenres.isEmpty() && preferredArtists.isEmpty()) {
+            return "${base}__in_mix"
+        }
+        val langKey = preferredLanguages.map { it.trim().lowercase() }.sorted().joinToString(",")
+        val genreKey = preferredGenres.map { it.trim().lowercase() }.sorted().joinToString(",")
+        val artistKey = preferredArtists.map { it.trim().lowercase() }.sorted().take(4).joinToString(",")
+        return "${base}__l=${langKey}__g=${genreKey}__a=${artistKey}"
+    }
+
+    fun getCachedGenreShelves(
+        genreTitle: String,
+        preferredLanguages: Set<String> = emptySet(),
+        preferredGenres: Set<String> = emptySet(),
+        preferredArtists: Set<String> = emptySet()
+    ): List<ExploreGenreShelf>? =
+        genreShelvesCache[buildGenreTasteCacheKey(genreTitle, preferredLanguages, preferredGenres, preferredArtists)]
 
     fun getCachedCollectionPage(item: ExploreShelfItem): ExploreCollectionPage? {
         val key = item.browseId?.takeIf { it.isNotBlank() }
@@ -968,87 +989,225 @@ class InnertubeApi(
         genreTitle: String,
         browseId: String? = null,
         params: String? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        preferredLanguages: Set<String> = emptySet(),
+        preferredGenres: Set<String> = emptySet(),
+        preferredArtists: Set<String> = emptySet()
     ): List<ExploreGenreShelf> = withContext(Dispatchers.IO) {
-        val cacheKey = genreTitle.trim().lowercase()
+        val cacheKey = buildGenreTasteCacheKey(genreTitle, preferredLanguages, preferredGenres, preferredArtists)
+        val coverKey = genreTitle.trim().lowercase()
         if (!forceRefresh) {
             genreShelvesCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
         }
 
-        val shelves = mutableListOf<ExploreGenreShelf>()
-
-        // 1. Resolve official YouTube Music browseId & params for this mood/genre if available
-        var resolvedBrowseId = browseId?.takeIf { it.isNotBlank() }
-        var resolvedParams = params?.takeIf { it.isNotBlank() }
-        if (resolvedBrowseId == null || resolvedParams == null) {
-            val allMoods = fetchMoodsAndGenres()
-            val matched = allMoods.firstOrNull { it.title.equals(genreTitle.trim(), ignoreCase = true) }
-                ?: allMoods.firstOrNull {
-                    it.title.contains(genreTitle.trim(), ignoreCase = true) ||
-                        genreTitle.trim().contains(it.title, ignoreCase = true)
-                }
-            if (matched != null) {
-                resolvedBrowseId = matched.browseId
-                resolvedParams = matched.params
-            }
-        }
-
-        // 2. Query YouTube Music's native Mood/Genre browse page (`FEmusic_moods_and_genres_category`)
-        if (!resolvedBrowseId.isNullOrBlank()) {
-            try {
-                val raw = postBrowseRequest(resolvedBrowseId, resolvedParams)
-                if (!raw.isNullOrBlank()) {
-                    val parsed = parseBrowseShelves(JSONObject(raw))
-                    if (parsed.isNotEmpty()) {
-                        shelves.addAll(parsed)
+        // Run native YouTube Music browse AND personalized Bollywood/Indian + User Taste shelves in parallel
+        val (globalShelves, personalizedShelves) = kotlinx.coroutines.coroutineScope {
+            val nativeDeferred = async {
+                val out = mutableListOf<ExploreGenreShelf>()
+                var resolvedBrowseId = browseId?.takeIf { it.isNotBlank() }
+                var resolvedParams = params?.takeIf { it.isNotBlank() }
+                if (resolvedBrowseId == null || resolvedParams == null) {
+                    val allMoods = fetchMoodsAndGenres()
+                    val matched = allMoods.firstOrNull { it.title.equals(genreTitle.trim(), ignoreCase = true) }
+                        ?: allMoods.firstOrNull {
+                            it.title.contains(genreTitle.trim(), ignoreCase = true) ||
+                                genreTitle.trim().contains(it.title, ignoreCase = true)
+                        }
+                    if (matched != null) {
+                        resolvedBrowseId = matched.browseId
+                        resolvedParams = matched.params
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Native mood browse failed for $genreTitle", e)
+                if (!resolvedBrowseId.isNullOrBlank()) {
+                    try {
+                        val raw = postBrowseRequest(resolvedBrowseId, resolvedParams)
+                        if (!raw.isNullOrBlank()) {
+                            val parsed = parseBrowseShelves(JSONObject(raw))
+                            if (parsed.isNotEmpty()) {
+                                out.addAll(parsed)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Native mood browse failed for $genreTitle", e)
+                    }
+                }
+                if (out.isEmpty()) {
+                    val sectionSpecs = getCuratedSectionSpecsForGenre(genreTitle)
+                    val built = kotlinx.coroutines.coroutineScope {
+                        sectionSpecs.take(2).map { (sectionTitle, queryList) ->
+                            async { buildCuratedPlaylistShelf(genreTitle, sectionTitle, queryList) }
+                        }.mapNotNull { it.await() }
+                    }
+                    out.addAll(built)
+                }
+                out
             }
+
+            val tasteAndIndianDeferred = async {
+                buildPersonalizedAndIndianShelvesForGenre(
+                    genreTitle = genreTitle,
+                    preferredLanguages = preferredLanguages,
+                    preferredGenres = preferredGenres,
+                    preferredArtists = preferredArtists
+                )
+            }
+
+            nativeDeferred.await() to tasteAndIndianDeferred.await()
         }
 
-        // 3. If native browse returned fewer than 2 shelves (or custom MyPlayer genre/mood),
-        //    build multi-section OpenTune-style playlist carousels in parallel!
-        if (shelves.size < 2) {
-            val sectionSpecs = getCuratedSectionSpecsForGenre(genreTitle)
-            val builtShelves = kotlinx.coroutines.coroutineScope {
-                sectionSpecs.map { (sectionTitle, queryList) ->
-                    async {
-                        buildCuratedPlaylistShelf(genreTitle, sectionTitle, queryList)
-                    }
-                }.mapNotNull { it.await() }
+        // Interleave 50% User Taste & Bollywood/Indian shelves with 50% Global/YouTube Music shelves
+        val merged = mutableListOf<ExploreGenreShelf>()
+        val seenTitles = HashSet<String>()
+        val maxLen = maxOf(personalizedShelves.size, globalShelves.size)
+        for (i in 0 until maxLen) {
+            personalizedShelves.getOrNull(i)?.let { shelf ->
+                if (shelf.items.isNotEmpty() && seenTitles.add(shelf.title.lowercase())) {
+                    merged.add(shelf)
+                }
             }
-            val existingTitles = shelves.map { it.title.lowercase() }.toSet()
-            builtShelves.forEach { shelf ->
-                if (shelf.title.lowercase() !in existingTitles && shelf.items.isNotEmpty()) {
-                    shelves.add(shelf)
+            globalShelves.getOrNull(i)?.let { shelf ->
+                if (shelf.items.isNotEmpty() && seenTitles.add(shelf.title.lowercase())) {
+                    merged.add(shelf)
                 }
             }
         }
 
         // Cache first cover for mood tile
-        shelves.firstNotNullOfOrNull { s -> s.items.firstNotNullOfOrNull { it.thumbnailUrl.takeIf { u -> u.isNotBlank() } } }
-            ?.let { moodCoverCache[cacheKey] = it }
+        merged.firstNotNullOfOrNull { s -> s.items.firstNotNullOfOrNull { it.thumbnailUrl.takeIf { u -> u.isNotBlank() } } }
+            ?.let { moodCoverCache[coverKey] = it }
 
-        if (shelves.isNotEmpty()) {
-            genreShelvesCache[cacheKey] = shelves
+        if (merged.isNotEmpty()) {
+            genreShelvesCache[cacheKey] = merged
         }
-        shelves
+        merged
+    }
+
+    /**
+     * Builds Bollywood/Indian + 50% User Music Taste shelves for any Mood/Genre (e.g., Chill, Workout, Commute)
+     * so opening a genre never shows only Hollywood/English playlists.
+     */
+    private suspend fun buildPersonalizedAndIndianShelvesForGenre(
+        genreTitle: String,
+        preferredLanguages: Set<String>,
+        preferredGenres: Set<String>,
+        preferredArtists: Set<String>
+    ): List<ExploreGenreShelf> = kotlinx.coroutines.coroutineScope {
+        val cleanGenre = genreTitle.trim()
+        val lower = cleanGenre.lowercase()
+
+        // 1. User Music Taste shelf specs (uses user's selected languages, artists & genres)
+        val userLangs = preferredLanguages.map { it.trim() }.filter { it.isNotBlank() }
+        val userArtists = preferredArtists.map { it.trim() }.filter { it.isNotBlank() }
+        val userGenres = preferredGenres.map { it.trim() }.filter { it.isNotBlank() }
+
+        val tasteSpecs = mutableListOf<Pair<String, String>>()
+        userArtists.take(2).forEach { artist ->
+            tasteSpecs.add("$artist • $cleanGenre" to "$artist $cleanGenre songs")
+        }
+        userLangs.take(2).forEach { lang ->
+            tasteSpecs.add("$lang $cleanGenre Mix" to "$lang $cleanGenre hits songs")
+        }
+        userGenres.firstOrNull { !it.equals(cleanGenre, ignoreCase = true) }?.let { favGenre ->
+            val langPrefix = userLangs.firstOrNull() ?: "Hindi"
+            tasteSpecs.add("$favGenre x $cleanGenre" to "$langPrefix $favGenre $cleanGenre songs")
+        }
+        // Ensure at least 3 rich cards in the Taste shelf even if user hasn't picked many preferences yet
+        if (tasteSpecs.size < 3) {
+            val primaryLang = userLangs.firstOrNull() ?: "Bollywood Hindi"
+            tasteSpecs.add("$primaryLang $cleanGenre Picks" to "$primaryLang $cleanGenre playlist songs")
+        }
+        if (tasteSpecs.size < 4) {
+            tasteSpecs.add("Desi $cleanGenre Essentials" to "Indian $cleanGenre songs mix")
+        }
+
+        // 2. Bollywood & Indian shelf specs tailored to the exact mood/genre
+        val bollywoodSpecs: List<Pair<String, String>> = when {
+            "workout" in lower || "gym" in lower -> listOf(
+                "Bollywood Gym Beast" to "Bollywood workout gym high energy hindi songs",
+                "Punjabi Pump & Power" to "Punjabi gym workout motivation songs",
+                "Desi Cardio & Running" to "Hindi fast beat running workout songs",
+                "Indian Bass & Phonk" to "Indian hip hop rap workout gym songs"
+            )
+            "chill" in lower || "lo-fi" in lower || "lofi" in lower -> listOf(
+                "Bollywood Lo-Fi Chill" to "Bollywood lofi chill hindi songs",
+                "Hindi Acoustic Unplugged" to "Bollywood acoustic unplugged chill songs",
+                "Indian Late Night Vibe" to "Hindi late night chill relaxing songs",
+                "Indie India Chill" to "Indian indie chill peaceful songs"
+            )
+            "commute" in lower || "drive" in lower -> listOf(
+                "Bollywood Long Drive" to "Bollywood long drive road trip hindi songs",
+                "Punjabi Highway Vibes" to "Punjabi car drive bass songs",
+                "Hindi Morning Commute" to "Hindi feel good morning drive songs",
+                "Desi Night Drive" to "Bollywood night drive lofi songs"
+            )
+            "energize" in lower || "party" in lower -> listOf(
+                "Bollywood Party Anthems" to "Bollywood dance party hit songs",
+                "Punjabi Club Bangers" to "Punjabi party dance club songs",
+                "Desi High Energy" to "Hindi upbeat energetic feel good songs",
+                "Indian EDM & Remixes" to "Bollywood dj remix party songs"
+            )
+            "romance" in lower || "love" in lower -> listOf(
+                "Bollywood Love Classics" to "Bollywood romantic love hindi songs",
+                "Arijit & Romantic Hits" to "Arijit Singh romantic hindi songs",
+                "Punjabi Romantic Vibes" to "Punjabi romantic love songs",
+                "Indie Indian Romance" to "Indian indie love acoustic songs"
+            )
+            "sad" in lower -> listOf(
+                "Bollywood Heartbreak" to "Bollywood sad emotional hindi songs",
+                "Hindi Sad Lo-Fi" to "Hindi sad lofi slow reverb songs",
+                "Punjabi Sad Ballads" to "Punjabi sad emotional songs",
+                "Soulful Indian Sad" to "Arijit Singh Jubin Nautiyal sad songs"
+            )
+            "focus" in lower || "study" in lower || "sleep" in lower -> listOf(
+                "Bollywood Instrumental" to "Bollywood piano guitar instrumental peaceful",
+                "Hindi Soft Lo-Fi Study" to "Hindi soft lofi study focus beats",
+                "Indian Flute & Ambient" to "Indian flute bansuri relaxing peaceful music",
+                "Calm Bollywood Unplugged" to "Bollywood calm soothing acoustic songs"
+            )
+            else -> listOf(
+                "Bollywood $cleanGenre" to "Bollywood Hindi $cleanGenre hit songs",
+                "Punjabi $cleanGenre" to "Punjabi $cleanGenre trending songs",
+                "Indian Indie $cleanGenre" to "Indian indie $cleanGenre songs",
+                "Desi $cleanGenre Mix" to "Hindi Indian $cleanGenre playlist songs"
+            )
+        }
+
+        val tasteLabel = if (userLangs.isNotEmpty() || userArtists.isNotEmpty() || userGenres.isNotEmpty()) {
+            "Matched to Your Taste • $cleanGenre"
+        } else {
+            "For You • Indian $cleanGenre"
+        }
+
+        val shelf1Deferred = async {
+            buildCuratedPlaylistShelf(cleanGenre, tasteLabel, tasteSpecs.distinctBy { it.first }.take(4))
+        }
+        val shelf2Deferred = async {
+            buildCuratedPlaylistShelf(cleanGenre, "Bollywood & Indian $cleanGenre", bollywoodSpecs)
+        }
+
+        listOfNotNull(shelf1Deferred.await(), shelf2Deferred.await())
     }
 
     /**
      * Lazily loads the first playlist cover art for a mood/genre tile on the Explore board
      * (matching OpenTune's `MoodCovers.load(mood)`).
      */
-    suspend fun fetchFirstCoverForMood(genreTitle: String, browseId: String? = null, params: String? = null): String? =
+    suspend fun fetchFirstCoverForMood(
+        genreTitle: String,
+        browseId: String? = null,
+        params: String? = null,
+        avoidUrls: Set<String> = emptySet()
+    ): String? =
         withContext(Dispatchers.IO) {
             val key = genreTitle.trim().lowercase()
-            moodCoverCache[key]?.let { return@withContext it }
+            moodCoverCache[key]?.takeIf { it !in avoidUrls }?.let { return@withContext it }
             val shelves = fetchGenreOrMoodShelves(genreTitle, browseId, params)
-            shelves.firstNotNullOfOrNull { s ->
-                s.items.firstNotNullOfOrNull { it.thumbnailUrl.takeIf { u -> u.isNotBlank() } }
-            }?.also { moodCoverCache[key] = it }
+            val allCandidates = shelves.flatMap { s -> s.items }
+                .mapNotNull { it.thumbnailUrl.takeIf { u -> u.isNotBlank() } }
+                .distinct()
+            val picked = allCandidates.firstOrNull { it !in avoidUrls }
+                ?: allCandidates.firstOrNull()
+            picked?.also { moodCoverCache[key] = it }
         }
 
     /**

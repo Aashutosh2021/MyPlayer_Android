@@ -81,7 +81,7 @@ class SponsorBlockManager @Inject constructor(
 
         val request = Request.Builder()
             .url(urlBuilder.build())
-            .header("User-Agent", "MyPlayer/6.8 (https://myplayer-660ee.web.app)")
+            .header("User-Agent", "MyPlayer/6.9 (https://myplayer-660ee.web.app)")
             .build()
 
         val parsed = runCatching {

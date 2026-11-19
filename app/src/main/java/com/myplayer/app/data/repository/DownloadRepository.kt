@@ -48,6 +48,7 @@ class DownloadRepository @Inject constructor(
     private val songDao: SongDao,
     private val folderDao: FolderDao,
     private val cachedLyricsDao: CachedLyricsDao,
+    private val lyricsRepository: com.myplayer.app.data.lyrics.LyricsRepository,
     private val okHttpClient: OkHttpClient,
     private val preferencesManager: PreferencesManager
 ) {
@@ -360,22 +361,53 @@ class DownloadRepository @Inject constructor(
                 localPlayablePath = fallbackFile.absolutePath
             }
 
-            // 5. Register in SongDao so it immediately shows up under Library -> Local Files!
+            // 5. Save offline thumbnail/poster locally + fetch & cache offline lyrics!
             val localId = "local_${md5Hex(localPlayablePath!!).take(16)}"
+            val offlineArtUri = downloadExportThumbnailLocally(
+                videoId = song.videoId.ifBlank { localId },
+                remoteThumbnailUrl = song.thumbnailUrl,
+                audioSavedPath = localPlayablePath!!
+            )
             songDao.insertSong(
                 SongEntity(
                     id = localId,
                     title = song.title,
                     artist = song.artist,
-                    album = "MyPlayer ($ext.uppercase())",
+                    album = "MyPlayer (${ext.uppercase()})",
                     duration = song.durationMs,
                     path = localPlayablePath!!,
-                    albumArt = song.thumbnailUrl.ifBlank { null },
+                    albumArt = offlineArtUri?.ifBlank { null } ?: song.thumbnailUrl.ifBlank { null },
                     dateAdded = System.currentTimeMillis(),
                     playCount = 0,
                     videoId = song.videoId.takeIf { it.length == 11 }
                 )
             )
+            runCatching {
+                val lyricId = song.videoId.ifBlank { localId }
+                val lyricsResult = lyricsRepository.fetchLyrics(
+                    songId = lyricId,
+                    trackName = song.title,
+                    artistName = song.artist,
+                    durationSeconds = (song.durationMs / 1000L).toInt(),
+                    localPath = localPlayablePath
+                )
+                val lrcText = lyricsResult?.syncedLyrics?.takeIf { it.isNotBlank() }
+                    ?: lyricsResult?.plainLyrics?.takeIf { it.isNotBlank() }
+                if (!lrcText.isNullOrBlank()) {
+                    lyricsRepository.saveOfflineLrcFile(lyricId, lrcText)
+                    if (localId != lyricId) {
+                        lyricsRepository.saveOfflineLrcFile(localId, lrcText)
+                        lyricsRepository.saveCustomLyrics(localId, song.title, song.artist, lrcText)
+                    }
+                    val savedAudioPath = localPlayablePath!!
+                    if (!savedAudioPath.startsWith("content://")) {
+                        val audioFile = File(savedAudioPath)
+                        audioFile.parentFile?.let { parent ->
+                            runCatching { File(parent, "${audioFile.nameWithoutExtension}.lrc").writeText(lrcText) }
+                        }
+                    }
+                }
+            }
 
             setDownloadProgress(song.videoId, 100)
             savedDisplayLocation
@@ -526,6 +558,53 @@ class DownloadRepository @Inject constructor(
         }
     }
 
+    private fun downloadExportThumbnailLocally(
+        videoId: String,
+        remoteThumbnailUrl: String,
+        audioSavedPath: String
+    ): String? {
+        val artDir = File(context.filesDir, "artwork").apply { mkdirs() }
+        val localArtFile = File(artDir, "$videoId.jpg")
+        if (localArtFile.exists() && localArtFile.length() > 512L) {
+            return Uri.fromFile(localArtFile).toString()
+        }
+        val candidates = buildList {
+            if (remoteThumbnailUrl.startsWith("http://") || remoteThumbnailUrl.startsWith("https://")) {
+                add(remoteThumbnailUrl)
+            }
+            if (videoId.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
+                add("https://i.ytimg.com/vi/$videoId/hq720.jpg")
+                add("https://i.ytimg.com/vi/$videoId/sddefault.jpg")
+                add("https://i.ytimg.com/vi/$videoId/hqdefault.jpg")
+                add("https://img.youtube.com/vi/$videoId/hqdefault.jpg")
+            }
+        }.distinct()
+        for (url in candidates) {
+            try {
+                val req = Request.Builder()
+                    .url(url)
+                    .addHeader("User-Agent", "Mozilla/5.0 (Android 14; Mobile)")
+                    .build()
+                okHttpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val bytes = resp.body?.bytes()
+                        if (bytes != null && bytes.size > 512) {
+                            localArtFile.writeBytes(bytes)
+                            if (!audioSavedPath.startsWith("content://")) {
+                                val audioFile = File(audioSavedPath)
+                                audioFile.parentFile?.let { parent ->
+                                    runCatching { File(parent, "${audioFile.nameWithoutExtension}.jpg").writeBytes(bytes) }
+                                }
+                            }
+                            return Uri.fromFile(localArtFile).toString()
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return remoteThumbnailUrl.ifBlank { null }
+    }
+
     private fun md5Hex(input: String): String {
         val bytes = MessageDigest.getInstance("MD5").digest(input.toByteArray(Charsets.UTF_8))
         return bytes.joinToString("") { "%02x".format(it) }
@@ -550,6 +629,10 @@ class DownloadRepository @Inject constructor(
             val localArt = File(File(context.filesDir, "artwork"), "${entity.id}.jpg")
             if (localArt.exists()) {
                 localArt.delete()
+            }
+            val localLrc = File(File(context.filesDir, "lyrics"), "${entity.id}.lrc")
+            if (localLrc.exists()) {
+                localLrc.delete()
             }
         } catch (e: Exception) {
             Log.e("DownloadRepository", "Could not delete file", e)
